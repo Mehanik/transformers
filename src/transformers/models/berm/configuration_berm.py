@@ -25,8 +25,7 @@ from ...utils import logging
 
 logger = logging.get_logger(__name__)
 
-BERM_PRETRAINED_CONFIG_ARCHIVE_MAP = {
-}
+BERM_PRETRAINED_CONFIG_ARCHIVE_MAP = {}
 
 
 class BermConfig(PretrainedConfig):
@@ -41,12 +40,12 @@ class BermConfig(PretrainedConfig):
     Args:
         vocab_size (`int`, *optional*, defaults to 30522):
             Vocabulary size of the RoBERTa model. Defines the number of different tokens that can be represented by the
-            `inputs_ids` passed when calling [`RobertaModel`] or [`TFRobertaModel`].
+            `inputs_ids` passed when calling [`BermModel`] or [`TFBermModel`].
         hidden_size (`int`, *optional*, defaults to 768):
             Dimensionality of the encoder layers and the pooler layer.
         num_hidden_layers (`int`, *optional*, defaults to 12):
             Number of hidden layers in the Transformer encoder.
-        num_attention_heads (`int`, *optional*, defaults to 12):
+        num_matrix_heads (`int`, *optional*, defaults to 12):
             Number of attention heads for each attention layer in the Transformer encoder.
         intermediate_size (`int`, *optional*, defaults to 3072):
             Dimensionality of the "intermediate" (often named feed-forward) layer in the Transformer encoder.
@@ -61,7 +60,7 @@ class BermConfig(PretrainedConfig):
             The maximum sequence length that this model might ever be used with. Typically set this to something large
             just in case (e.g., 512 or 1024 or 2048).
         type_vocab_size (`int`, *optional*, defaults to 2):
-            The vocabulary size of the `token_type_ids` passed when calling [`RobertaModel`] or [`TFRobertaModel`].
+            The vocabulary size of the `token_type_ids` passed when calling [`BermModel`] or [`TFBermModel`].
         initializer_range (`float`, *optional*, defaults to 0.02):
             The standard deviation of the truncated_normal_initializer for initializing all weight matrices.
         layer_norm_eps (`float`, *optional*, defaults to 1e-12):
@@ -83,13 +82,13 @@ class BermConfig(PretrainedConfig):
     Examples:
 
     ```python
-    >>> from transformers import RobertaConfig, RobertaModel
+    >>> from transformers import BermConfig, BermModel
 
     >>> # Initializing a RoBERTa configuration
-    >>> configuration = RobertaConfig()
+    >>> configuration = BermConfig()
 
     >>> # Initializing a model (with random weights) from the configuration
-    >>> model = RobertaModel(configuration)
+    >>> model = BermModel(configuration)
 
     >>> # Accessing the model configuration
     >>> configuration = model.config
@@ -101,7 +100,7 @@ class BermConfig(PretrainedConfig):
         vocab_size=30522,
         hidden_size=768,
         num_hidden_layers=12,
-        num_attention_heads=12,
+        num_matrix_heads=12,
         intermediate_size=3072,
         hidden_act="gelu",
         hidden_dropout_prob=0.1,
@@ -116,6 +115,7 @@ class BermConfig(PretrainedConfig):
         position_embedding_type="absolute",
         use_cache=True,
         classifier_dropout=None,
+        output_matrices=False,
         **kwargs
     ):
         super().__init__(pad_token_id=pad_token_id, bos_token_id=bos_token_id, eos_token_id=eos_token_id, **kwargs)
@@ -123,7 +123,7 @@ class BermConfig(PretrainedConfig):
         self.vocab_size = vocab_size
         self.hidden_size = hidden_size
         self.num_hidden_layers = num_hidden_layers
-        self.num_attention_heads = num_attention_heads
+        self.num_matrix_heads = num_matrix_heads
         self.hidden_act = hidden_act
         self.intermediate_size = intermediate_size
         self.hidden_dropout_prob = hidden_dropout_prob
@@ -135,3 +135,4 @@ class BermConfig(PretrainedConfig):
         self.position_embedding_type = position_embedding_type
         self.use_cache = use_cache
         self.classifier_dropout = classifier_dropout
+        self.output_matrices = output_matrices
