@@ -593,6 +593,51 @@ class BermModel(BermPreTrainedModel):
             # cross_attentions=encoder_outputs.cross_attentions,
         )
 
+    def get_extended_attention_mask(
+        self, attention_mask: torch.Tensor, input_shape: Tuple[int], device=None, dtype: torch.float = None
+    ) -> torch.Tensor:
+        """
+        Makes broadcastable attention and causal masks so that future and masked tokens are ignored.
+
+        Arguments:
+            attention_mask (`torch.Tensor`):
+                Mask with ones indicating tokens to attend to, zeros for tokens to ignore.
+            input_shape (`Tuple[int]`):
+                The shape of the input to the model.
+
+        Returns:
+            `torch.Tensor` The extended attention mask, with a the same dtype as `attention_mask.dtype`.
+        """
+        if dtype is None:
+            dtype = self.dtype
+
+        if not (attention_mask.dim() == 2 and self.config.is_decoder):
+            # show warning only if it won't be shown in `create_extended_attention_mask_for_decoder`
+            if device is not None:
+                warnings.warn(
+                    "The `device` argument is deprecated and will be removed in v5 of Transformers.", FutureWarning
+                )
+        # We can provide a self-attention mask of dimensions [batch_size, from_seq_length, to_seq_length]
+        # ourselves in which case we just need to make it broadcastable to all heads.
+        if attention_mask.dim() == 3:
+            extended_attention_mask = attention_mask[:, None, :, :]
+        elif attention_mask.dim() == 2:
+            # Provided a padding mask of dimensions [batch_size, seq_length]
+            # - if the model is a decoder, apply a causal mask in addition to the padding mask
+            # - if the model is an encoder, make the mask broadcastable to [batch_size, num_heads, seq_length, seq_length]
+            if self.config.is_decoder:
+                extended_attention_mask = ModuleUtilsMixin.create_extended_attention_mask_for_decoder(
+                    input_shape, attention_mask, device
+                )
+            else:
+                extended_attention_mask = attention_mask[:, None, None, :]
+        else:
+            raise ValueError(
+                f"Wrong shape for input_ids (shape {input_shape}) or attention_mask (shape {attention_mask.shape})"
+            )
+
+        return extended_attention_mask
+
 
 class BermHead(nn.Module):
     """BERM Head for masked language modeling."""
@@ -756,8 +801,10 @@ class BermMatrixLayer(nn.Module):
         a = a.moveaxis(1, 0)  # we will iterate over context axis
         a = a.reshape(a.size()[0], batch_sz * self.num_matrix_heads, self.matrix_dim, self.matrix_dim)
 
+        # make matrix unitary
+
         if past_vector is None:
-            v = torch.zeros(a.size(1), 1, self.matrix_dim, device=device)
+            v = torch.zeros(a.size(1), self.matrix_dim, 1, device=device)
             v[..., 0] = 1  # initial states
         else:
             v = past_vector
@@ -765,7 +812,7 @@ class BermMatrixLayer(nn.Module):
         v_new_shape = (batch_sz, 1, self.num_matrix_heads * self.matrix_dim)
 
         for i in range(a.size(0)):
-            new_v = torch.bmm(v, a[i])
+            new_v = torch.bmm(a[i], v)
 
             if attention_mask is not None:
                 v = (
