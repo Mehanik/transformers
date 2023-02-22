@@ -799,13 +799,15 @@ class BermMatrixLayer(nn.Module):
 
         a = self.fc_to_mat(hidden_states)
         a = a.moveaxis(1, 0)  # we will iterate over context axis
-        a = a.reshape(a.size()[0], batch_sz * self.num_matrix_heads, self.matrix_dim, self.matrix_dim)
+        a = a.reshape(context_sz, batch_sz * self.num_matrix_heads, self.matrix_dim, self.matrix_dim)
 
-        # make matrix unitary
+        a = self.make_orthogonal(
+            a.view(context_sz, batch_sz * self.num_matrix_heads, self.matrix_dim, self.matrix_dim)
+        ).view(a.size())
 
         if past_vector is None:
             v = torch.zeros(a.size(1), self.matrix_dim, 1, device=device)
-            v[..., 0] = 1  # initial states
+            v[..., 0, :] = 1  # initial states
         else:
             v = past_vector
 
@@ -822,6 +824,7 @@ class BermMatrixLayer(nn.Module):
             else:
                 v = new_v
 
+        v = v * math.sqrt(self.matrix_dim)  # scale so v have same std as hidden_states
         context_layer = v.view(v_new_shape).repeat(1, context_sz, 1)
         context_layer = torch.concatenate((hidden_states, context_layer), axis=-1)
         context_layer = nn.functional.relu(self.fc_to_hidden(self.dropout(context_layer)))
@@ -835,6 +838,24 @@ class BermMatrixLayer(nn.Module):
             outputs = outputs + (v,)
 
         return outputs
+
+    def make_orthogonal(self, z):
+        """Based on `ortho_group_gen` scipy function"""
+        q, r = torch.linalg.qr(z)
+        # The last two dimensions are the rows and columns of R matrices.
+        # Extract the diagonals. Note that this eliminates a dimension.
+
+        # make diagonal entries of R to be positive, then the decomposition is unique
+        s = torch.diag_embed(r.diagonal(dim1=-2, dim2=-1).sign())
+        r = s @ r
+        q = q @ s
+
+        d = r.diagonal(offset=0, dim1=-2, dim2=-1)
+        # Add back a dimension for proper broadcasting: we're dividing
+        # each row of each R matrix by the diagonal of the R matrix.
+        q *= (d / d.abs())[..., None, :]  # to broadcast properly
+
+        return q
 
 
 class BermMatrixOutput(nn.Module):
