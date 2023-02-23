@@ -792,47 +792,75 @@ class BermMatrixLayer(nn.Module):
         assert encoder_hidden_states is None, "Not implemented"
         assert encoder_attention_mask is None, "Not implemented"
         assert head_mask is None, "Not implemented"
+        assert past_vector is None, "Nott implemented"
 
         device = hidden_states.device
 
         batch_sz, context_sz, *_ = hidden_states.size()
 
-        a = self.fc_to_mat(hidden_states)
-        a = a.moveaxis(1, 0)  # we will iterate over context axis
-        a = a.reshape(context_sz, batch_sz * self.num_matrix_heads, self.matrix_dim, self.matrix_dim)
+        m = self.fc_to_mat(hidden_states)
+        m = m.transpose(0, 1)  # we will iterate over context axis
+        m = m.reshape(context_sz, batch_sz * self.num_matrix_heads, self.matrix_dim, self.matrix_dim)
 
-        a = self.make_orthogonal(
-            a.view(context_sz, batch_sz * self.num_matrix_heads, self.matrix_dim, self.matrix_dim)
-        ).view(a.size())
+        # m = self.make_orthogonal(
+        #     m.view(context_sz, batch_sz * self.num_matrix_heads, self.matrix_dim, self.matrix_dim)
+        # ).view(m.size())
 
-        if past_vector is None:
-            v = torch.zeros(a.size(1), self.matrix_dim, 1, device=device)
-            v[..., 0, :] = 1  # initial states
-        else:
-            v = past_vector
+        m = m / torch.norm(m, dim=(2, 3), keepdim=True)
+        v_attention_shape = (batch_sz, 1, self.num_matrix_heads * self.matrix_dim)
 
-        v_new_shape = (batch_sz, 1, self.num_matrix_heads * self.matrix_dim)
+        v_lr = torch.zeros(context_sz, batch_sz * self.num_matrix_heads, self.matrix_dim, 1, device=device)
+        v_rl = torch.zeros(context_sz, batch_sz * self.num_matrix_heads, self.matrix_dim, 1, device=device)
 
-        for i in range(a.size(0)):
-            new_v = torch.bmm(a[i], v)
+        v = torch.zeros(batch_sz * self.num_matrix_heads, self.matrix_dim, 1, device=device)
+        v[..., 0, :] = 1  # initial states
+
+        for i in range(context_sz):
+            new_v = torch.bmm(m[i], v)
 
             if attention_mask is not None:
                 v = (
-                    new_v.view(v_new_shape) * attention_mask[..., i]
-                    + v.view(v_new_shape) * (1 - attention_mask[..., i])
+                    new_v.view(v_attention_shape) * attention_mask[..., i]
+                    + v.view(v_attention_shape) * (1 - attention_mask[..., i])
                 ).view(new_v.size())
             else:
                 v = new_v
 
-        v = v * math.sqrt(self.matrix_dim)  # scale so v have same std as hidden_states
-        context_layer = v.view(v_new_shape).repeat(1, context_sz, 1)
-        context_layer = torch.concatenate((hidden_states, context_layer), axis=-1)
-        context_layer = nn.functional.relu(self.fc_to_hidden(self.dropout(context_layer)))
+            v_lr[i] = v
 
-        outputs = (context_layer,)
+        v = torch.zeros(batch_sz * self.num_matrix_heads, self.matrix_dim, 1, device=device)
+        v[..., 0, :] = 1  # initial states
+
+        for i in reversed(range(context_sz, 0)):
+            new_v = torch.bmm(m[i], v)
+
+            if attention_mask is not None:
+                v = (
+                    new_v.view(v_attention_shape) * attention_mask[..., i]
+                    + v.view(v_attention_shape) * (1 - attention_mask[..., i])
+                ).view(new_v.size())
+            else:
+                v = new_v
+
+            v_rl[i] = v
+
+        v_lr = v_lr.view(context_sz, batch_sz, self.num_matrix_heads * self.matrix_dim)
+        v_lr = v_lr.transpose(0, 1)
+
+        v_rl = v_rl.view(context_sz, batch_sz, self.num_matrix_heads * self.matrix_dim)
+        v_rl = v_rl.transpose(0, 1)
+
+        # TODO norm
+        # v = v * math.sqrt(self.matrix_dim)  # scale so v have same std as hidden_states
+        x = torch.concatenate((v_lr, v_rl), axis=-1)
+        x = self.dropout(x)
+        x = self.fc_to_hidden(x)
+        x = gelu(x)
+
+        outputs = (x,)
 
         if output_matrices:
-            outputs = outputs + (a,)
+            outputs = outputs + (m,)
 
         if self.is_decoder:
             outputs = outputs + (v,)
