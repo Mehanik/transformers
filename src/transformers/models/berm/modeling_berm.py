@@ -761,7 +761,7 @@ class BermEmbeddings(nn.Module):
 class BermMatrixLayer(nn.Module):
     def __init__(self, config):
         super().__init__()
-        if config.hidden_size % config.num_matrix_heads != 0:
+        if config.hidden_size % (config.num_matrix_heads * 2) != 0:
             raise ValueError(
                 f"The hidden size ({config.hidden_size}) is not a multiple of the number of attention "
                 f"heads ({config.num_matrix_heads})"
@@ -769,13 +769,10 @@ class BermMatrixLayer(nn.Module):
 
         self.hidden_size = config.hidden_size
         self.num_matrix_heads = config.num_matrix_heads
-        self.matrix_dim = int(config.hidden_size / config.num_matrix_heads)
+        self.matrix_dim = int(config.hidden_size / config.num_matrix_heads / 2)
         self.all_matrix_size = self.num_matrix_heads * self.matrix_dim * self.matrix_dim
 
         self.fc_to_mat = nn.Linear(config.hidden_size, self.all_matrix_size)
-        self.fc_to_hidden = nn.Linear(config.hidden_size * 2, config.hidden_size)
-
-        self.dropout = nn.Dropout(config.attention_probs_dropout_prob)
 
         self.is_decoder = config.is_decoder
 
@@ -806,7 +803,8 @@ class BermMatrixLayer(nn.Module):
         #     m.view(context_sz, batch_sz * self.num_matrix_heads, self.matrix_dim, self.matrix_dim)
         # ).view(m.size())
 
-        m = m / torch.norm(m, dim=(2, 3), keepdim=True)
+        # m = m / torch.norm(m, dim=(2, 3), keepdim=True)
+        m = m / torch.norm(m, dim=(-1), keepdim=True)
         v_attention_shape = (batch_sz, 1, self.num_matrix_heads * self.matrix_dim)
 
         v_lr = torch.zeros(context_sz, batch_sz * self.num_matrix_heads, self.matrix_dim, 1, device=device)
@@ -817,7 +815,6 @@ class BermMatrixLayer(nn.Module):
 
         for i in range(context_sz):
             new_v = torch.bmm(m[i], v)
-
             if attention_mask is not None:
                 v = (
                     new_v.view(v_attention_shape) * attention_mask[..., i]
@@ -853,9 +850,6 @@ class BermMatrixLayer(nn.Module):
         # TODO norm
         # v = v * math.sqrt(self.matrix_dim)  # scale so v have same std as hidden_states
         x = torch.concatenate((v_lr, v_rl), axis=-1)
-        x = self.dropout(x)
-        x = self.fc_to_hidden(x)
-        x = gelu(x)
 
         outputs = (x,)
 
