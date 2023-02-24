@@ -804,7 +804,12 @@ class BermMatrixLayer(nn.Module):
         # ).view(m.size())
 
         # m = m / torch.norm(m, dim=(2, 3), keepdim=True)
-        m = m / torch.norm(m, dim=(-1), keepdim=True)
+        # m = m / torch.norm(m, dim=(-1), keepdim=True)
+
+        d = d = m.det()
+        d = d[..., None, None]
+        m = m / d.abs() ** (1 / self.matrix_dim)
+
         v_attention_shape = (batch_sz, 1, self.num_matrix_heads * self.matrix_dim)
 
         v_lr = torch.zeros(context_sz, batch_sz * self.num_matrix_heads, self.matrix_dim, 1, device=device)
