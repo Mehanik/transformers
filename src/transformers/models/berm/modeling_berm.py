@@ -216,7 +216,7 @@ class BermOutputWithPast(ModelOutput):
     last_hidden_state: torch.FloatTensor = None
     past_vectors: Optional[Tuple[torch.FloatTensor]] = None
     hidden_states: Optional[Tuple[torch.FloatTensor]] = None
-    # attentions: Optional[Tuple[torch.FloatTensor]] = None
+    matrices: Optional[Tuple[torch.FloatTensor]] = None
     # cross_attentions: Optional[Tuple[torch.FloatTensor]] = None
 
 
@@ -265,7 +265,7 @@ class BermOutputWithPooling(ModelOutput):
     pooler_output: torch.FloatTensor = None
     hidden_states: Optional[Tuple[torch.FloatTensor]] = None
     past_vectors: Optional[Tuple[torch.FloatTensor]] = None
-    # attentions: Optional[Tuple[torch.FloatTensor]] = None
+    matrices: Optional[Tuple[torch.FloatTensor]] = None
     # cross_attentions: Optional[Tuple[torch.FloatTensor]] = None
 
 
@@ -384,24 +384,41 @@ class BermForMaskedLM(BermPreTrainedModel):
             inputs_embeds=inputs_embeds,
             encoder_hidden_states=encoder_hidden_states,
             encoder_attention_mask=encoder_attention_mask,
-            output_matrices=output_matrices,
+            output_matrices=True,  # TODO by argument
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
         )
         sequence_output = outputs[0]
         prediction_scores = self.lm_head(sequence_output)
 
+        all_matrices = outputs[-1]
+
+        norms = []
+        for m in all_matrices:
+            norms.append(torch.norm(m, dim=-1))
+            norms.append(torch.norm(m, dim=-2))
+        norms = torch.concatenate(norms, axis=-1)
+
+        target = torch.ones(norms.size(), device=self.device)  # 1 is a target value, we want matrix to be orthogonal
+        matrix_norm_loss_fct = torch.nn.MSELoss()
+        matrix_norm_loss = matrix_norm_loss_fct(norms, target)
+
         masked_lm_loss = None
         if labels is not None:
             loss_fct = CrossEntropyLoss()
             masked_lm_loss = loss_fct(prediction_scores.view(-1, self.config.vocab_size), labels.view(-1))
 
+        if masked_lm_loss is not None:
+            combined_loss = masked_lm_loss + matrix_norm_loss
+        else:
+            combined_loss = matrix_norm_loss
+
         if not return_dict:
             output = (prediction_scores,) + outputs[2:]
-            return ((masked_lm_loss,) + output) if masked_lm_loss is not None else output
+            return ((combined_loss,) + output) if combined_loss is not None else output
 
         return MaskedLMOutput(
-            loss=masked_lm_loss,
+            loss=combined_loss,
             logits=prediction_scores,
             hidden_states=outputs.hidden_states,
             # attentions=outputs.attentions,
@@ -589,7 +606,7 @@ class BermModel(BermPreTrainedModel):
             pooler_output=pooled_output,
             past_vectors=encoder_outputs.past_vectors,
             hidden_states=encoder_outputs.hidden_states,
-            # attentions=encoder_outputs.attentions,
+            matrices=encoder_outputs.matrices,
             # cross_attentions=encoder_outputs.cross_attentions,
         )
 
@@ -803,12 +820,12 @@ class BermMatrixLayer(nn.Module):
         #     m.view(context_sz, batch_sz * self.num_matrix_heads, self.matrix_dim, self.matrix_dim)
         # ).view(m.size())
 
-        # m = m / torch.norm(m, dim=(2, 3), keepdim=True)
-        # m = m / torch.norm(m, dim=(-1), keepdim=True)
+        # m_norm = m / torch.norm(m, dim=(2, 3), keepdim=True)
+        m_norm = m / torch.norm(m, dim=-1, keepdim=True)
 
-        d = d = m.det()
-        d = d[..., None, None]
-        m = m / d.abs() ** (1 / self.matrix_dim)
+        # d = d = m.det()
+        # d = d[..., None, None]
+        # m_norm = m / d.abs() ** (1 / self.matrix_dim)
 
         v_attention_shape = (batch_sz, 1, self.num_matrix_heads * self.matrix_dim)
 
@@ -819,7 +836,7 @@ class BermMatrixLayer(nn.Module):
         v[..., 0, :] = 1  # initial states
 
         for i in range(context_sz):
-            new_v = torch.bmm(m[i], v)
+            new_v = torch.bmm(m_norm[i], v)
             if attention_mask is not None:
                 v = (
                     new_v.view(v_attention_shape) * attention_mask[..., i]
@@ -834,7 +851,7 @@ class BermMatrixLayer(nn.Module):
         v[..., 0, :] = 1  # initial states
 
         for i in reversed(range(context_sz, 0)):
-            new_v = torch.bmm(m[i], v)
+            new_v = torch.bmm(m_norm[i], v)
 
             if attention_mask is not None:
                 v = (
@@ -1041,8 +1058,8 @@ class BermEncoder(nn.Module):
         return_dict: Optional[bool] = True,
     ) -> Union[Tuple[torch.Tensor], BermOutputWithPast]:
         all_hidden_states = () if output_hidden_states else None
-        all_self_attentions = () if output_matrices else None
-        all_cross_attentions = () if output_matrices and self.config.add_cross_attention else None
+        all_matrices = () if output_matrices else None
+        # all_cross_attentions = () if output_matrices and self.config.add_cross_attention else None
 
         next_decoder_cache = () if use_cache else None
         for i, layer_module in enumerate(self.layer):
@@ -1089,9 +1106,9 @@ class BermEncoder(nn.Module):
                 raise NotImplemented()
                 next_decoder_cache += (layer_outputs[-1],)
             if output_matrices:
-                raise NotImplemented()
-                all_self_attentions = all_self_attentions + (layer_outputs[1],)
+                all_matrices = all_matrices + (layer_outputs[1],)
                 if self.config.add_cross_attention:
+                    raise NotImplementedError()
                     all_cross_attentions = all_cross_attentions + (layer_outputs[2],)
 
         if output_hidden_states:
@@ -1104,8 +1121,8 @@ class BermEncoder(nn.Module):
                     hidden_states,
                     next_decoder_cache,
                     all_hidden_states,
-                    all_self_attentions,
-                    all_cross_attentions,
+                    all_matrices,
+                    # all_cross_attentions,
                 ]
                 if v is not None
             )
@@ -1113,7 +1130,7 @@ class BermEncoder(nn.Module):
             last_hidden_state=hidden_states,
             past_vectors=next_decoder_cache,
             hidden_states=all_hidden_states,
-            # attentions=all_self_attentions,
+            matrices=all_matrices,
             # cross_attentions=all_cross_attentions,
         )
 
