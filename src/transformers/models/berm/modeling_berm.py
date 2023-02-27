@@ -384,29 +384,31 @@ class BermForMaskedLM(BermPreTrainedModel):
             inputs_embeds=inputs_embeds,
             encoder_hidden_states=encoder_hidden_states,
             encoder_attention_mask=encoder_attention_mask,
-            output_matrices=output_matrices,  # TODO by argument
+            output_matrices=True,  # TODO by argument
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
         )
         sequence_output = outputs[0]
         prediction_scores = self.lm_head(sequence_output)
 
-        # all_matrices = outputs[-1]
+        all_matrices = outputs[-1]
 
-        # norms = []
-        # for m in all_matrices:
-        #     norms.append(torch.norm(m, dim=-1))
-        #     norms.append(torch.norm(m, dim=-2))
-        # norms = torch.concatenate(norms, axis=-1)
+        norms = []
+        for m in all_matrices:
+            # norms.append(torch.norm(m, dim=-1))
+            norms.append(torch.norm(m, dim=-2))
+        norms = torch.concatenate(norms, axis=-1)
 
-        # target = torch.ones(norms.size(), device=self.device)  # 1 is a target value, we want matrix to be orthogonal
-        # matrix_norm_loss_fct = torch.nn.MSELoss()
-        # matrix_norm_loss = matrix_norm_loss_fct(norms, target)
+        target = torch.ones(norms.size(), device=self.device)  # 1 is a target value, we want matrix to be orthogonal
+        matrix_norm_loss_fct = torch.nn.MSELoss()
+        matrix_norm_loss = matrix_norm_loss_fct(norms, target)
 
         masked_lm_loss = None
         if labels is not None:
             loss_fct = CrossEntropyLoss()
             masked_lm_loss = loss_fct(prediction_scores.view(-1, self.config.vocab_size), labels.view(-1))
+
+            masked_lm_loss = masked_lm_loss + matrix_norm_loss
 
         # if masked_lm_loss is not None:
         #     combined_loss = masked_lm_loss + matrix_norm_loss
@@ -820,8 +822,8 @@ class BermMatrixLayer(nn.Module):
         #     m.view(context_sz, batch_sz * self.num_matrix_heads, self.matrix_dim, self.matrix_dim)
         # ).view(m.size())
 
-        m_norm = m / torch.norm(m, dim=(2, 3), keepdim=True)
-        # m_norm = m / torch.norm(m, dim=-1, keepdim=True)
+        # m_norm = m / torch.norm(m, dim=(2, 3), keepdim=True)
+        m_norm = m / torch.norm(m, dim=-1, keepdim=True)
 
         # d = d = m.det()
         # d = d[..., None, None]
@@ -876,7 +878,7 @@ class BermMatrixLayer(nn.Module):
         outputs = (x,)
 
         if output_matrices:
-            outputs = outputs + (m,)
+            outputs = outputs + (m_norm,)
 
         if self.is_decoder:
             outputs = outputs + (v,)
