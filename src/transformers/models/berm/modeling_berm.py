@@ -792,8 +792,13 @@ class BermMatrixLayer(nn.Module):
         self.v_to_hidden = nn.ModuleList(
             [nn.Linear(self.matrix_dim * 6, self.matrix_dim) for _ in range(self.num_matrix_heads)]
         )
+        self.matrix_norm_alg = config.matrix_norm_alg
 
         self.is_decoder = config.is_decoder
+        if isinstance(config.hidden_act, str):
+            self.act_fn = ACT2FN[config.hidden_act]
+        else:
+            self.act_fn = config.hidden_act
 
     def forward(
         self,
@@ -819,19 +824,17 @@ class BermMatrixLayer(nn.Module):
         m = m.transpose(0, 1)  # we will iterate over context axis
         m = m.reshape(context_sz, batch_sz * self.num_matrix_heads, self.matrix_dim, self.matrix_dim)
 
-        mnorm_alg = "ortho"
-
-        if mnorm_alg is None:
+        if self.matrix_norm_alg is None:
             m_norm = m
-        elif mnorm_alg == "ortho":
+        elif self.matrix_norm_alg == "ortho":
             m_norm = self.make_orthogonal(
                 m.view(context_sz, batch_sz * self.num_matrix_heads, self.matrix_dim, self.matrix_dim)
             ).view(m.size())
-        elif mnorm_alg == "2,3":
+        elif self.matrix_norm_alg == "2,3":
             m_norm = m / torch.norm(m, dim=(2, 3), keepdim=True)
-        elif mnorm_alg == "-1":
+        elif self.matrix_norm_alg == "-1":
             m_norm = m / torch.norm(m, dim=-1, keepdim=True)
-        elif mnorm_alg == "det":
+        elif self.matrix_norm_alg == "det":
             d = d = m.det()
             d = d[..., None, None]
             m_norm = m / d.abs() ** (1 / self.matrix_dim)
@@ -920,6 +923,7 @@ class BermMatrixLayer(nn.Module):
         x = torch.concatenate((v_local, v_global, v_lr, v_rl, v_local_shift_r, v_local_shift_l), axis=-1)
         x = [dense(x[..., i, :]) for i, dense in enumerate(self.v_to_hidden)]
         x = torch.concatenate(x, axis=-2)
+        x = self.act_fn(x)
         x = x.view(batch_sz, context_sz, self.num_matrix_heads * self.matrix_dim)
 
         outputs = (x,)
@@ -954,14 +958,15 @@ class BermMatrixLayer(nn.Module):
 class BermMatrixOutput(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.dense = nn.Linear(config.hidden_size, config.hidden_size)
+        # self.dense = nn.Linear(config.hidden_size, config.hidden_size)
         self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
-        self.dropout = nn.Dropout(config.hidden_dropout_prob)
+        # self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
     def forward(self, hidden_states: torch.Tensor, input_tensor: torch.Tensor) -> torch.Tensor:
-        hidden_states = self.dense(hidden_states)
-        hidden_states = self.dropout(hidden_states)
-        hidden_states = self.LayerNorm(hidden_states + input_tensor)
+        # hidden_states = self.dense(hidden_states)
+        # hidden_states = self.dropout(hidden_states)
+        # hidden_states = self.LayerNorm(hidden_states + input_tensor)
+        hidden_states = self.LayerNorm(hidden_states)
         return hidden_states
 
 

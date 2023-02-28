@@ -116,6 +116,7 @@ class BermConfig(PretrainedConfig):
         use_cache=True,
         classifier_dropout=None,
         output_matrices=False,
+        matrix_norm_alg=None,
         **kwargs
     ):
         super().__init__(pad_token_id=pad_token_id, bos_token_id=bos_token_id, eos_token_id=eos_token_id, **kwargs)
@@ -136,3 +137,4 @@ class BermConfig(PretrainedConfig):
         self.use_cache = use_cache
         self.classifier_dropout = classifier_dropout
         self.output_matrices = output_matrices
+        self.matrix_norm_alg = matrix_norm_alg
