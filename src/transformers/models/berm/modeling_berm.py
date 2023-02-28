@@ -395,7 +395,7 @@ class BermForMaskedLM(BermPreTrainedModel):
 
         norms = []
         for m in all_matrices:
-            # norms.append(torch.norm(m, dim=-1))
+            norms.append(torch.norm(m, dim=-1))
             norms.append(torch.norm(m, dim=-2))
         norms = torch.concatenate(norms, axis=-1)
 
@@ -409,11 +409,6 @@ class BermForMaskedLM(BermPreTrainedModel):
             masked_lm_loss = loss_fct(prediction_scores.view(-1, self.config.vocab_size), labels.view(-1))
 
             masked_lm_loss = masked_lm_loss + matrix_norm_loss
-
-        # if masked_lm_loss is not None:
-        #     combined_loss = masked_lm_loss + matrix_norm_loss
-        # else:
-        #     combined_loss = matrix_norm_loss
 
         if not return_dict:
             output = (prediction_scores,) + outputs[2:]
@@ -780,7 +775,7 @@ class BermEmbeddings(nn.Module):
 class BermMatrixLayer(nn.Module):
     def __init__(self, config):
         super().__init__()
-        if config.hidden_size % (config.num_matrix_heads * 2) != 0:
+        if config.hidden_size % (config.num_matrix_heads * 4) != 0:
             raise ValueError(
                 f"The hidden size ({config.hidden_size}) is not a multiple of the number of attention "
                 f"heads ({config.num_matrix_heads})"
@@ -788,7 +783,7 @@ class BermMatrixLayer(nn.Module):
 
         self.hidden_size = config.hidden_size
         self.num_matrix_heads = config.num_matrix_heads
-        self.matrix_dim = int(config.hidden_size / config.num_matrix_heads / 2)
+        self.matrix_dim = int(config.hidden_size / config.num_matrix_heads / 4)
         self.all_matrix_size = self.num_matrix_heads * self.matrix_dim * self.matrix_dim
 
         self.fc_to_mat = nn.Linear(config.hidden_size, self.all_matrix_size)
@@ -814,23 +809,32 @@ class BermMatrixLayer(nn.Module):
 
         batch_sz, context_sz, *_ = hidden_states.size()
 
+        # Matrix preparation
         m = self.fc_to_mat(hidden_states)
         m = m.transpose(0, 1)  # we will iterate over context axis
         m = m.reshape(context_sz, batch_sz * self.num_matrix_heads, self.matrix_dim, self.matrix_dim)
 
-        # m = self.make_orthogonal(
-        #     m.view(context_sz, batch_sz * self.num_matrix_heads, self.matrix_dim, self.matrix_dim)
-        # ).view(m.size())
+        mnorm_alg = "-1"
 
-        # m_norm = m / torch.norm(m, dim=(2, 3), keepdim=True)
-        m_norm = m / torch.norm(m, dim=-1, keepdim=True)
+        if mnorm_alg is None:
+            m_norm = m
+        elif mnorm_alg == "otho":
+            m_norm = self.make_orthogonal(
+                m.view(context_sz, batch_sz * self.num_matrix_heads, self.matrix_dim, self.matrix_dim)
+            ).view(m.size())
+        elif mnorm_alg == "2,3":
+            m_norm = m / torch.norm(m, dim=(2, 3), keepdim=True)
+        elif mnorm_alg == "-1":
+            m_norm = m / torch.norm(m, dim=-1, keepdim=True)
+        elif mnorm_alg == "det":
+            d = d = m.det()
+            d = d[..., None, None]
+            m_norm = m / d.abs() ** (1 / self.matrix_dim)
+        else:
+            raise Exception()
 
-        # d = d = m.det()
-        # d = d[..., None, None]
-        # m_norm = m / d.abs() ** (1 / self.matrix_dim)
-
+        # v_lr v_rl
         v_attention_shape = (batch_sz, 1, self.num_matrix_heads * self.matrix_dim)
-
         v_lr = torch.zeros(context_sz, batch_sz * self.num_matrix_heads, self.matrix_dim, 1, device=device)
         v_rl = torch.zeros(context_sz, batch_sz * self.num_matrix_heads, self.matrix_dim, 1, device=device)
 
@@ -849,6 +853,8 @@ class BermMatrixLayer(nn.Module):
 
             v_lr[i] = v
 
+        v_global = v
+
         v = torch.zeros(batch_sz * self.num_matrix_heads, self.matrix_dim, 1, device=device)
         v[..., 0, :] = 1  # initial states
 
@@ -865,15 +871,37 @@ class BermMatrixLayer(nn.Module):
 
             v_rl[i] = v
 
+        # local
+        v_local = torch.zeros(context_sz, batch_sz * self.num_matrix_heads, self.matrix_dim, 1, device=device)
+
+        test_vector = torch.ones(batch_sz * self.num_matrix_heads, self.matrix_dim, 1, device=device) / math.sqrt(
+            self.matrix_dim
+        )
+        # test_vector = torch.zeros(batch_sz * self.num_matrix_heads, self.matrix_dim, 1, device=device)
+        # test_vector[..., 0, :] = 1
+
+        for i in range(context_sz):
+            local_v = torch.bmm(m_norm[i], test_vector)
+            if attention_mask is not None:
+                v_local[i] = (
+                    local_v.view(v_attention_shape) * attention_mask[..., i]
+                    + test_vector.view(v_attention_shape) * (1 - attention_mask[..., i])
+                ).view(local_v.size())
+            else:
+                v_local[i] = local_v
+
+        v_local = v_local.view(context_sz, batch_sz, self.num_matrix_heads * self.matrix_dim)
+        v_local = v_local.transpose(0, 1)
+
+        v_global = v_global.view(v_attention_shape).repeat(1, context_sz, 1)
+
         v_lr = v_lr.view(context_sz, batch_sz, self.num_matrix_heads * self.matrix_dim)
         v_lr = v_lr.transpose(0, 1)
 
         v_rl = v_rl.view(context_sz, batch_sz, self.num_matrix_heads * self.matrix_dim)
         v_rl = v_rl.transpose(0, 1)
 
-        # TODO norm
-        # v = v * math.sqrt(self.matrix_dim)  # scale so v have same std as hidden_states
-        x = torch.concatenate((v_lr, v_rl), axis=-1)
+        x = torch.concatenate((v_local, v_global, v_lr, v_rl), axis=-1)
 
         outputs = (x,)
 
@@ -881,7 +909,7 @@ class BermMatrixLayer(nn.Module):
             outputs = outputs + (m_norm,)
 
         if self.is_decoder:
-            outputs = outputs + (v,)
+            outputs = outputs + (v_global,)
 
         return outputs
 
