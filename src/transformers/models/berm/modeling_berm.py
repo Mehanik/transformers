@@ -395,26 +395,26 @@ class BermForMaskedLM(BermPreTrainedModel):
 
         loss = None
         if labels is not None:
-            norms = []
-            for m in all_matrices:
-                norms.append(torch.norm(m, dim=-1))
-                norms.append(torch.norm(m, dim=-2))
-            norms = torch.concatenate(norms, axis=-1)
+            # norms = []
+            # for m in all_matrices:
+            #     norms.append(torch.norm(m, dim=-1))
+            #     norms.append(torch.norm(m, dim=-2))
+            # norms = torch.concatenate(norms, axis=-1)
 
-            target = torch.ones(
-                norms.size(), device=self.device
-            )  # 1 is a target value, we want matrix to be orthogonal
+            # target = torch.ones(
+            #     norms.size(), device=self.device
+            # )  # 1 is a target value, we want matrix to be orthogonal
+            # # matrix_norm_loss_fct = torch.nn.MSELoss()
+            # # matrix_norm_loss = matrix_norm_loss_fct(norms, target)
+            # # matrix_norm_loss_fct = torch.nn.CrossEntropyLoss()
+            # # matrix_norm_loss = matrix_norm_loss_fct(norms / 2, target / 2)
             # matrix_norm_loss_fct = torch.nn.MSELoss()
             # matrix_norm_loss = matrix_norm_loss_fct(norms, target)
-            # matrix_norm_loss_fct = torch.nn.CrossEntropyLoss()
-            # matrix_norm_loss = matrix_norm_loss_fct(norms / 2, target / 2)
-            matrix_norm_loss_fct = torch.nn.MSELoss()
-            matrix_norm_loss = matrix_norm_loss_fct(norms, target)
 
             loss_fct = CrossEntropyLoss()
             masked_lm_loss = loss_fct(prediction_scores.view(-1, self.config.vocab_size), labels.view(-1))
 
-            loss = masked_lm_loss + matrix_norm_loss
+            loss = masked_lm_loss  # + matrix_norm_loss
 
         if not return_dict:
             output = (prediction_scores,) + outputs[2:]
@@ -790,13 +790,15 @@ class BermMatrixLayer(nn.Module):
         self.hidden_size = config.hidden_size
         self.num_matrix_heads = config.num_matrix_heads
         self.matrix_dim = config.matrix_dim
+        self.use_for_context = config.use_for_context
 
         self.head_vector_sz = int(self.hidden_size / self.num_matrix_heads)
-        self.fc_to_mat = nn.ModuleList(
-            [nn.Linear(self.head_vector_sz, self.matrix_dim * self.matrix_dim) for _ in range(self.num_matrix_heads)]
-        )
+        self.fc_to_mat = nn.Linear(self.hidden_size, self.num_matrix_heads * self.matrix_dim * self.matrix_dim)
         self.v_to_hidden = nn.ModuleList(
-            [nn.Linear(self.matrix_dim * 6, self.head_vector_sz) for _ in range(self.num_matrix_heads)]
+            [
+                nn.Linear(self.matrix_dim * len(self.use_for_context), self.head_vector_sz)
+                for _ in range(self.num_matrix_heads)
+            ]
         )
         self.matrix_norm_alg = config.matrix_norm_alg
 
@@ -805,6 +807,7 @@ class BermMatrixLayer(nn.Module):
             self.act_fn = ACT2FN[config.hidden_act]
         else:
             self.act_fn = config.hidden_act
+        self.vector_init_direction = config.vector_init_direction
 
     def forward(
         self,
@@ -826,9 +829,7 @@ class BermMatrixLayer(nn.Module):
         batch_sz, context_sz, *_ = hidden_states.size()
 
         # Matrix preparation
-        hidden_divided = hidden_states.view(batch_sz, context_sz, self.num_matrix_heads, self.head_vector_sz)
-        m = [dense(hidden_divided[..., i, :]) for i, dense in enumerate(self.fc_to_mat)]
-        m = torch.concatenate(m, axis=-1)
+        m = self.fc_to_mat(hidden_states)
 
         m = m.transpose(0, 1)  # we will iterate over context axis
         m = m.reshape(context_sz, batch_sz * self.num_matrix_heads, self.matrix_dim, self.matrix_dim)
@@ -853,14 +854,17 @@ class BermMatrixLayer(nn.Module):
 
         # v_lr v_rl
         v_attention_shape = (batch_sz, 1, self.num_matrix_heads * self.matrix_dim)
-        v_lr = torch.zeros(context_sz, batch_sz * self.num_matrix_heads, self.matrix_dim, 1, device=device)
-        v_rl = torch.zeros(context_sz, batch_sz * self.num_matrix_heads, self.matrix_dim, 1, device=device)
+        v_lr = []
 
-        # v = torch.zeros(batch_sz * self.num_matrix_heads, self.matrix_dim, 1, device=device)
-        # v[..., 0, :] = 1  # initial states
-        v = torch.ones(batch_sz * self.num_matrix_heads, self.matrix_dim, 1, device=device) / math.sqrt(
-            self.matrix_dim
-        )
+        if self.vector_init_direction == "one":
+            v = torch.zeros(batch_sz * self.num_matrix_heads, self.matrix_dim, 1, device=device)
+            v[..., 0, :] = 1  # initial states
+        elif self.vector_init_direction == "all":
+            v = torch.ones(batch_sz * self.num_matrix_heads, self.matrix_dim, 1, device=device) / math.sqrt(
+                self.matrix_dim
+            )
+        else:
+            raise KeyError()
 
         for i in range(context_sz):
             new_v = torch.bmm(m_norm[i], v)
@@ -872,17 +876,22 @@ class BermMatrixLayer(nn.Module):
             else:
                 v = new_v
 
-            v_lr[i] = v
+            v_lr.append(v)
 
         v_global = v
 
-        # v = torch.zeros(batch_sz * self.num_matrix_heads, self.matrix_dim, 1, device=device)
-        # v[..., 0, :] = 1  # initial states
-        v = torch.ones(batch_sz * self.num_matrix_heads, self.matrix_dim, 1, device=device) / math.sqrt(
-            self.matrix_dim
-        )
+        if self.vector_init_direction == "one":
+            v = torch.zeros(batch_sz * self.num_matrix_heads, self.matrix_dim, 1, device=device)
+            v[..., 0, :] = 1  # initial states
+        elif self.vector_init_direction == "all":
+            v = torch.ones(batch_sz * self.num_matrix_heads, self.matrix_dim, 1, device=device) / math.sqrt(
+                self.matrix_dim
+            )
+        else:
+            raise KeyError()
 
-        for i in reversed(range(context_sz, 0)):
+        v_rl = []
+        for i in reversed(range(context_sz)):
             new_v = torch.bmm(m_norm[i], v)
 
             if attention_mask is not None:
@@ -893,45 +902,69 @@ class BermMatrixLayer(nn.Module):
             else:
                 v = new_v
 
-            v_rl[i] = v
+            v_rl.append(v)
 
         # local
-        v_local = torch.zeros(context_sz, batch_sz * self.num_matrix_heads, self.matrix_dim, 1, device=device)
+        if self.vector_init_direction == "one":
+            test_vector = torch.zeros(batch_sz * self.num_matrix_heads, self.matrix_dim, 1, device=device)
+            test_vector[..., 0, :] = 1
+        elif self.vector_init_direction == "all":
+            test_vector = torch.ones(batch_sz * self.num_matrix_heads, self.matrix_dim, 1, device=device) / math.sqrt(
+                self.matrix_dim
+            )
+        else:
+            raise KeyError()
 
-        test_vector = torch.ones(batch_sz * self.num_matrix_heads, self.matrix_dim, 1, device=device) / math.sqrt(
-            self.matrix_dim
-        )
-        # test_vector = torch.zeros(batch_sz * self.num_matrix_heads, self.matrix_dim, 1, device=device)
-        # test_vector[..., 0, :] = 1
+        v_local = []  # vectors rotated only by current step matrix, without context
 
         for i in range(context_sz):
-            local_v = torch.bmm(m_norm[i], test_vector)
+            v = torch.bmm(m_norm[i], test_vector)
             if attention_mask is not None:
-                v_local[i] = (
-                    local_v.view(v_attention_shape) * attention_mask[..., i]
-                    + test_vector.view(v_attention_shape) * (1 - attention_mask[..., i])
-                ).view(local_v.size())
+                v_local.append(
+                    (
+                        v.view(v_attention_shape) * attention_mask[..., i]
+                        + test_vector.view(v_attention_shape) * (1 - attention_mask[..., i])
+                    ).view(v.size())
+                )
             else:
-                v_local[i] = local_v
+                v_local.append(v)
 
+        v_local = torch.stack(v_local)
         v_local = v_local.view(context_sz, batch_sz, self.num_matrix_heads, self.matrix_dim)
         v_local = v_local.transpose(0, 1)
 
         v_local_shift_r = v_local.roll(shifts=1, dims=1)
-        v_local_shift_r[:, 0] = math.sqrt(1 / self.matrix_dim)
+        v_local_shift_r = torch.concatenate(
+            [torch.zeros(batch_sz, 1, self.num_matrix_heads, self.matrix_dim, device=device), v_local_shift_r[:, 1:]],
+            dim=1,
+        )
         v_local_shift_l = v_local.roll(shifts=-1, dims=1)
-        v_local_shift_l[:, -1] = math.sqrt(1 / self.matrix_dim)
+        v_local_shift_l = torch.concatenate(
+            [v_local_shift_l[:, :-1], torch.zeros(batch_sz, 1, self.num_matrix_heads, self.matrix_dim, device=device)],
+            dim=1,
+        )
 
         v_global = v_global.view(batch_sz, 1, self.num_matrix_heads, self.matrix_dim).repeat(1, context_sz, 1, 1)
 
+        v_lr = torch.stack(v_lr)
         v_lr = v_lr.view(context_sz, batch_sz, self.num_matrix_heads, self.matrix_dim)
         v_lr = v_lr.transpose(0, 1)
 
+        v_rl = torch.stack(v_rl)
         v_rl = v_rl.view(context_sz, batch_sz, self.num_matrix_heads, self.matrix_dim)
         v_rl = v_rl.transpose(0, 1)
 
-        x = torch.concatenate((v_local, v_global, v_lr, v_rl, v_local_shift_r, v_local_shift_l), axis=-1)
-        x = [dense(x[..., i, :]) for i, dense in enumerate(self.v_to_hidden)]
+        available_vectors = {
+            "local": v_local,
+            "global": v_global,
+            "lr": v_lr,
+            "rl": v_rl,
+            "local_r": v_local_shift_r,
+            "local_l": v_local_shift_l,
+        }
+        context = [available_vectors[s] for s in self.use_for_context]
+        x = torch.concatenate(context, axis=-1)
+        x = [dense(x[..., i, :]) for i, dense in enumerate(self.v_to_hidden)]  # apply each nn for its head
         x = torch.concatenate(x, axis=-2)
         x = self.act_fn(x)
         x = x.view(batch_sz, context_sz, self.num_matrix_heads * self.head_vector_sz)

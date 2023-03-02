@@ -118,7 +118,9 @@ class BermConfig(PretrainedConfig):
         output_matrices=False,
         matrix_norm_alg=None,
         matrix_dim=16,
-        **kwargs
+        vector_init_direction="one",
+        use_for_context=["lr"],
+        **kwargs,
     ):
         super().__init__(pad_token_id=pad_token_id, bos_token_id=bos_token_id, eos_token_id=eos_token_id, **kwargs)
 
@@ -140,3 +142,5 @@ class BermConfig(PretrainedConfig):
         self.output_matrices = output_matrices
         self.matrix_norm_alg = matrix_norm_alg
         self.matrix_dim = matrix_dim
+        self.vector_init_direction = vector_init_direction
+        self.use_for_context = use_for_context
