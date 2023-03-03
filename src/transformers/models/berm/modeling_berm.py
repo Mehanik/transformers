@@ -395,21 +395,21 @@ class BermForMaskedLM(BermPreTrainedModel):
 
         loss = None
         if labels is not None:
-            # norms = []
-            # for m in all_matrices:
-            #     norms.append(torch.norm(m, dim=-1))
-            #     norms.append(torch.norm(m, dim=-2))
-            # norms = torch.concatenate(norms, axis=-1)
+            norms = []
+            for m in all_matrices:
+                # norms.append(torch.norm(m, dim=-1))
+                norms.append(torch.norm(m, dim=-2))
+            norms = torch.concatenate(norms, axis=-1)
 
-            # target = torch.ones(
-            #     norms.size(), device=self.device
-            # )  # 1 is a target value, we want matrix to be orthogonal
-            # # matrix_norm_loss_fct = torch.nn.MSELoss()
-            # # matrix_norm_loss = matrix_norm_loss_fct(norms, target)
-            # # matrix_norm_loss_fct = torch.nn.CrossEntropyLoss()
-            # # matrix_norm_loss = matrix_norm_loss_fct(norms / 2, target / 2)
+            target = torch.ones(
+                norms.size(), device=self.device
+            )  # 1 is a target value, we want matrix to be orthogonal
             # matrix_norm_loss_fct = torch.nn.MSELoss()
             # matrix_norm_loss = matrix_norm_loss_fct(norms, target)
+            # matrix_norm_loss_fct = torch.nn.CrossEntropyLoss()
+            # matrix_norm_loss = matrix_norm_loss_fct(norms / 2, target / 2)
+            matrix_norm_loss_fct = torch.nn.MSELoss()
+            matrix_norm_loss = matrix_norm_loss_fct(norms, target)
 
             loss_fct = CrossEntropyLoss()
             masked_lm_loss = loss_fct(prediction_scores.view(-1, self.config.vocab_size), labels.view(-1))
@@ -854,7 +854,6 @@ class BermMatrixLayer(nn.Module):
 
         # v_lr v_rl
         v_attention_shape = (batch_sz, 1, self.num_matrix_heads * self.matrix_dim)
-        v_lr = []
 
         if self.vector_init_direction == "one":
             v = torch.zeros(batch_sz * self.num_matrix_heads, self.matrix_dim, 1, device=device)
@@ -866,6 +865,7 @@ class BermMatrixLayer(nn.Module):
         else:
             raise KeyError()
 
+        v_lr = [v]
         for i in range(context_sz):
             new_v = torch.bmm(m_norm[i], v)
             if attention_mask is not None:
@@ -877,6 +877,8 @@ class BermMatrixLayer(nn.Module):
                 v = new_v
 
             v_lr.append(v)
+
+        v_lr = v_lr[:-1]
 
         v_global = v
 
@@ -890,9 +892,9 @@ class BermMatrixLayer(nn.Module):
         else:
             raise KeyError()
 
-        v_rl = []
+        v_rl = [v]
         for i in reversed(range(context_sz)):
-            new_v = torch.bmm(m_norm[i], v)
+            new_v = torch.bmm(m_norm[i].transpose(-1, -2), v)
 
             if attention_mask is not None:
                 v = (
@@ -903,6 +905,9 @@ class BermMatrixLayer(nn.Module):
                 v = new_v
 
             v_rl.append(v)
+
+        v_rl = v_rl[:-1]
+        v_rl = list(reversed(v_rl))
 
         # local
         if self.vector_init_direction == "one":
@@ -972,7 +977,7 @@ class BermMatrixLayer(nn.Module):
         outputs = (x,)
 
         if output_matrices:
-            outputs = outputs + (m,)
+            outputs = outputs + (m_norm,)
 
         if self.is_decoder:
             outputs = outputs + (v_global,)
