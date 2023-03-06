@@ -326,6 +326,10 @@ class BermForMaskedLM(BermPreTrainedModel):
                 "bi-directional self-attention."
             )
 
+        self.matrix_norm_loss_type = config.matrix_norm_loss_type
+        self.matrix_norm_loss_k = config.matrix_norm_loss_k
+        self.matrix_norm_loss_axis = config.matrix_norm_loss_axis
+
         self.berm = BermModel(config, add_pooling_layer=False)
         self.lm_head = BermHead(config)
 
@@ -384,7 +388,7 @@ class BermForMaskedLM(BermPreTrainedModel):
             inputs_embeds=inputs_embeds,
             encoder_hidden_states=encoder_hidden_states,
             encoder_attention_mask=encoder_attention_mask,
-            output_matrices=True,  # TODO by argument
+            output_matrices=self.matrix_norm_loss_type is not None or output_matrices,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
         )
@@ -396,25 +400,28 @@ class BermForMaskedLM(BermPreTrainedModel):
         loss = None
         if labels is not None:
             norms = []
-            for m in all_matrices:
-                # norms.append(torch.norm(m, dim=-1))
-                norms.append(torch.norm(m, dim=-2))
-            norms = torch.concatenate(norms, axis=-1)
+            matrix_norm_loss = 0
+            if self.matrix_norm_loss_type is not None:
+                for m in all_matrices:
+                    for dim in self.matrix_norm_loss_axis:
+                        norms.append(torch.norm(m, dim=dim))
+                norms = torch.concatenate(norms, axis=-1)
 
-            target = torch.ones(
-                norms.size(), device=self.device
-            )  # 1 is a target value, we want matrix to be orthogonal
-            # matrix_norm_loss_fct = torch.nn.MSELoss()
-            # matrix_norm_loss = matrix_norm_loss_fct(norms, target)
-            # matrix_norm_loss_fct = torch.nn.CrossEntropyLoss()
-            # matrix_norm_loss = matrix_norm_loss_fct(norms / 2, target / 2)
-            matrix_norm_loss_fct = torch.nn.MSELoss()
-            matrix_norm_loss = matrix_norm_loss_fct(norms, target)
+                # 1 is a target value, we want matrix to be orthogonal
+                target = torch.ones(norms.size(), device=self.device)
+                if self.matrix_norm_loss_type == "CrossEntropy":
+                    matrix_norm_loss_fct = torch.nn.CrossEntropyLoss()
+                elif self.matrix_norm_loss_type == "MSE":
+                    matrix_norm_loss_fct = torch.nn.MSELoss()
+                else:
+                    raise KeyError()
+
+                matrix_norm_loss = matrix_norm_loss_fct(norms, target)
 
             loss_fct = CrossEntropyLoss()
             masked_lm_loss = loss_fct(prediction_scores.view(-1, self.config.vocab_size), labels.view(-1))
 
-            loss = masked_lm_loss  # + matrix_norm_loss
+            loss = masked_lm_loss + matrix_norm_loss
 
         if not return_dict:
             output = (prediction_scores,) + outputs[2:]
@@ -791,21 +798,26 @@ class BermMatrixLayer(nn.Module):
         self.num_matrix_heads = config.num_matrix_heads
         self.matrix_dim = config.matrix_dim
         self.use_for_context = config.use_for_context
-        self.separate_networks_for_heads = config.separate_networks_for_heads
+        self.networks_for_heads = config.networks_for_heads
 
         self.head_vector_sz = int(self.hidden_size / self.num_matrix_heads)
         self.fc_to_mat = nn.Linear(self.hidden_size, self.num_matrix_heads * self.matrix_dim * self.matrix_dim)
-        if self.separate_networks_for_heads:
+        if self.networks_for_heads == "separate":
             self.v_to_hidden = nn.ModuleList(
                 [
                     nn.Linear(self.matrix_dim * len(self.use_for_context), self.head_vector_sz)
                     for _ in range(self.num_matrix_heads)
                 ]
             )
-        else:
+        elif self.networks_for_heads == "common":
             self.v_to_hidden = nn.Linear(
                 self.matrix_dim * len(self.use_for_context) * self.num_matrix_heads, self.hidden_size
             )
+        elif self.networks_for_heads == None:
+            pass
+        else:
+            raise KeyError()
+
         self.matrix_norm_alg = config.matrix_norm_alg
 
         self.is_decoder = config.is_decoder
@@ -835,7 +847,7 @@ class BermMatrixLayer(nn.Module):
 
         available_vectors = {}
 
-        if {"global", "lr"} & set(self.use_for_context):
+        if {"global", "lr", "lr_excl"} & set(self.use_for_context):
             v_lr = self.calculatte_vectors(
                 hidden_states,
                 m_norm,
@@ -845,13 +857,16 @@ class BermMatrixLayer(nn.Module):
                 reverse_direction=False,
             )
             v_global = v_lr[-1]
-            v_lr = v_lr[:-1]
+            v_lr_excl = v_lr[:-1]
+            v_lr = v_lr[1:]
+            v_lr_excl = self.prepare_history_tensor(v_lr_excl, context_sz, batch_sz)
             v_lr = self.prepare_history_tensor(v_lr, context_sz, batch_sz)
             v_global = v_global.view(batch_sz, 1, self.num_matrix_heads, self.matrix_dim).repeat(1, context_sz, 1, 1)
+            available_vectors["lr_excl"] = v_lr_excl
             available_vectors["lr"] = v_lr
             available_vectors["global"] = v_global
 
-        if {"rl"} & set(self.use_for_context):
+        if {"rl", "rl_excl"} & set(self.use_for_context):
             v_rl = self.calculatte_vectors(
                 hidden_states,
                 m_norm,
@@ -860,10 +875,14 @@ class BermMatrixLayer(nn.Module):
                 init_type=self.vector_init_direction,
                 reverse_direction=True,
             )
-            v_rl = v_rl[:-1]
+            v_rl_excl = v_rl[:-1]
+            v_rl = v_rl[1:]
             v_rl = list(reversed(v_rl))
+            v_rl_excl = list(reversed(v_rl_excl))
             v_rl = self.prepare_history_tensor(v_rl, context_sz, batch_sz)
+            v_rl_excl = self.prepare_history_tensor(v_rl_excl, context_sz, batch_sz)
             available_vectors["rl"] = v_rl
+            available_vectors["rl_excl"] = v_rl_excl
 
         if {"local", "local_l", "local_r"} & set(self.use_for_context):
             v_local = self.calculatte_vectors(
@@ -889,13 +908,16 @@ class BermMatrixLayer(nn.Module):
 
         context = [available_vectors[s] for s in self.use_for_context]
         x = torch.concatenate(context, axis=-1)
-        if self.separate_networks_for_heads:
+        if self.networks_for_heads == "separate":
             x = [dense(x[..., i, :]) for i, dense in enumerate(self.v_to_hidden)]  # apply each nn for its head
             x = torch.concatenate(x, axis=-2)
             x = x.flatten(-2)
-        else:
+            x = self.act_fn(x)
+        elif self.networks_for_heads == "common":
             x = self.v_to_hidden(x.flatten(-2))
-        x = self.act_fn(x)
+            x = self.act_fn(x)
+        elif self.networks_for_heads == None:
+            x = x.flatten(-2)
 
         outputs = (x,)
 

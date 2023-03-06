@@ -120,7 +120,10 @@ class BermConfig(PretrainedConfig):
         matrix_dim=16,
         vector_init_direction="one",
         use_for_context=["lr"],
-        separate_networks_for_heads=True,
+        networks_for_heads=None,
+        matrix_norm_loss_type="MSE",
+        matrix_norm_loss_axis=(-1,),
+        matrix_norm_loss_k=1.0,
         **kwargs,
     ):
         super().__init__(pad_token_id=pad_token_id, bos_token_id=bos_token_id, eos_token_id=eos_token_id, **kwargs)
@@ -145,4 +148,7 @@ class BermConfig(PretrainedConfig):
         self.matrix_dim = matrix_dim
         self.vector_init_direction = vector_init_direction
         self.use_for_context = use_for_context
-        self.separate_networks_for_heads = separate_networks_for_heads
+        self.networks_for_heads = networks_for_heads
+        self.matrix_norm_loss_type = matrix_norm_loss_type
+        self.matrix_norm_loss_k = matrix_norm_loss_k
+        self.matrix_norm_loss_axis = matrix_norm_loss_axis
