@@ -965,7 +965,7 @@ class BermMatrixLayer(nn.Module):
         elif self.matrix_norm_alg == "2,3":
             m_norm = m / torch.norm(m.detach(), dim=(2, 3), keepdim=True)
         elif self.matrix_norm_alg == "-1":
-            n = torch.norm(m.detach(), dim=-1, keepdim=True)
+            n = torch.norm(m, dim=-1, keepdim=True)
             m_norm = m / n
         elif self.matrix_norm_alg == "det":
             d = d = m.detach().det()
