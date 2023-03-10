@@ -1004,25 +1004,18 @@ class BermMatrixLayer(nn.Module):
         for i in order:
             new_v = torch.bmm(m[i], v)
 
-            if accumulate:
-                if attention_mask is not None:
-                    v = (
+            if attention_mask is not None:
+                history.append(
+                    (
                         new_v.view(v_attention_shape) * attention_mask[..., i]
                         + v.view(v_attention_shape) * (1 - attention_mask[..., i])
-                    ).view(new_v.size())
-                else:
-                    v = new_v
-                history.append(v)
+                    ).view(v.size())
+                )
             else:
-                if attention_mask is not None:
-                    history.append(
-                        (
-                            new_v.view(v_attention_shape) * attention_mask[..., i]
-                            + v.view(v_attention_shape) * (1 - attention_mask[..., i])
-                        ).view(v.size())
-                    )
-                else:
-                    history.append(v)
+                history.append(new_v)
+
+            if accumulate:
+                v = new_v
 
         return history
 
