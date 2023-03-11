@@ -421,7 +421,7 @@ class BermForMaskedLM(BermPreTrainedModel):
             loss_fct = CrossEntropyLoss()
             masked_lm_loss = loss_fct(prediction_scores.view(-1, self.config.vocab_size), labels.view(-1))
 
-            loss = masked_lm_loss + matrix_norm_loss
+            loss = masked_lm_loss + matrix_norm_loss * self.matrix_norm_loss_k
 
         if not return_dict:
             output = (prediction_scores,) + outputs[2:]
@@ -843,7 +843,7 @@ class BermMatrixLayer(nn.Module):
         assert past_vector is None, "Nott implemented"
 
         batch_sz, context_sz, *_ = hidden_states.size()
-        m_norm = self.predict_matrix(hidden_states)
+        m_norm, m = self.predict_matrix(hidden_states)
 
         available_vectors = {}
 
@@ -910,8 +910,7 @@ class BermMatrixLayer(nn.Module):
         x = torch.concatenate(context, axis=-1)
         if self.networks_for_heads == "separate":
             x = [dense(x[..., i, :]) for i, dense in enumerate(self.v_to_hidden)]  # apply each nn for its head
-            x = torch.concatenate(x, axis=-2)
-            x = x.flatten(-2)
+            x = torch.concatenate(x, axis=-1)
             x = self.act_fn(x)
         elif self.networks_for_heads == "common":
             x = self.v_to_hidden(x.flatten(-2))
@@ -922,7 +921,7 @@ class BermMatrixLayer(nn.Module):
         outputs = (x,)
 
         if output_matrices:
-            outputs = outputs + (m_norm,)
+            outputs = outputs + (m,)
 
         if self.is_decoder:
             outputs = outputs + (v_global,)
@@ -974,7 +973,7 @@ class BermMatrixLayer(nn.Module):
         else:
             raise KeyError()
 
-        return m_norm
+        return m_norm, m
 
     def calculatte_vectors(
         self,
