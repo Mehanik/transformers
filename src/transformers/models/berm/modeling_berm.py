@@ -19,7 +19,7 @@ import math
 from typing import List, Optional, Tuple, Union
 
 import torch
-from torch import nn, view_as_complex
+from torch import device, nn, view_as_complex
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 import torch.utils.checkpoint
 
@@ -330,6 +330,10 @@ class BermForMaskedLM(BermPreTrainedModel):
         self.matrix_norm_loss_k = config.matrix_norm_loss_k
         self.matrix_norm_loss_axis = config.matrix_norm_loss_axis
 
+        self.matrix_unitary_loss_type = config.matrix_unitary_loss
+        self.matrix_unitary_loss_k = config.matrix_unitary_loss_k
+        self.unitary_target = None
+
         self.berm = BermModel(config, add_pooling_layer=False)
         self.lm_head = BermHead(config)
 
@@ -388,7 +392,9 @@ class BermForMaskedLM(BermPreTrainedModel):
             inputs_embeds=inputs_embeds,
             encoder_hidden_states=encoder_hidden_states,
             encoder_attention_mask=encoder_attention_mask,
-            output_matrices=self.matrix_norm_loss_type is not None or output_matrices,
+            output_matrices=(
+                self.matrix_norm_loss_type is not None or self.matrix_unitary_loss_type is not None or output_matrices
+            ),
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
         )
@@ -399,29 +405,65 @@ class BermForMaskedLM(BermPreTrainedModel):
 
         loss = None
         if labels is not None:
-            norms = []
             matrix_norm_loss = 0
             if self.matrix_norm_loss_type is not None:
+                norms = []
                 for m in all_matrices:
+                    m = self.mask_matrix(m, attention_mask)
                     for dim in self.matrix_norm_loss_axis:
                         norms.append(torch.norm(m, dim=dim))
                 norms = torch.concatenate(norms, axis=-1)
 
                 # 1 is a target value, we want matrix to be orthogonal
                 target = torch.ones(norms.size(), device=self.device)
-                if self.matrix_norm_loss_type == "CrossEntropy":
-                    matrix_norm_loss_fct = torch.nn.CrossEntropyLoss()
-                elif self.matrix_norm_loss_type == "MSE":
+                if self.matrix_norm_loss_type == "MSE":
                     matrix_norm_loss_fct = torch.nn.MSELoss()
                 else:
                     raise KeyError()
 
                 matrix_norm_loss = matrix_norm_loss_fct(norms, target)
 
+            matrix_unitary_loss = 0
+            if self.matrix_unitary_loss_type is not None:
+                for m in all_matrices:
+                    context_sz, batch_size, n_heads, n, _ = m.size()
+                    m = self.mask_matrix(m, attention_mask)
+                    m = m.reshape(context_sz * batch_size * n_heads, n, n)
+                    m_tr = m.transpose(-1, -2)
+                    product = torch.bmm(m, m_tr)
+
+                    # 1 is a target value, we want matrix to be orthogonal
+                    if self.matrix_unitary_loss_type == "CrossEntropy":
+                        matrix_unitary_loss_fct = torch.nn.CrossEntropyLoss()
+                        target = [list(range(n)) for i in range(context_sz * batch_size * n_heads)]
+                        target = torch.tensor(target, device=self.device)
+                        target = target.flatten(-2)
+                        logits1 = product.reshape(context_sz * batch_size * n_heads * n, n)
+                        logits2 = product.transpose(-1, -2).reshape(context_sz * batch_size * n_heads * n, n)
+                        matrix_unitary_loss = (
+                            matrix_unitary_loss
+                            + matrix_unitary_loss_fct(logits1, target)
+                            + matrix_unitary_loss_fct(logits2, target)
+                        )
+                    elif self.matrix_unitary_loss_type == "MSE":
+                        if self.unitary_target is None:
+                            self.unitary_target = [
+                                torch.eye(n, device=self.device) for i in range(context_sz * batch_size * n_heads)
+                            ]
+                            self.unitary_target = torch.stack(self.unitary_target)
+                        matrix_unitary_loss_fct = torch.nn.MSELoss()
+                        matrix_norm_loss = matrix_norm_loss + matrix_unitary_loss_fct(product, self.unitary_target)
+                    else:
+                        raise KeyError()
+
             loss_fct = CrossEntropyLoss()
             masked_lm_loss = loss_fct(prediction_scores.view(-1, self.config.vocab_size), labels.view(-1))
 
-            loss = masked_lm_loss + matrix_norm_loss * self.matrix_norm_loss_k
+            loss = (
+                masked_lm_loss
+                + matrix_norm_loss * self.matrix_norm_loss_k
+                + matrix_unitary_loss * self.matrix_unitary_loss_k
+            )
 
         if not return_dict:
             output = (prediction_scores,) + outputs[2:]
@@ -433,6 +475,14 @@ class BermForMaskedLM(BermPreTrainedModel):
             hidden_states=outputs.hidden_states,
             # attentions=outputs.attentions,
         )
+
+    def mask_matrix(self, m, attention_mask):
+        context_sz, batch_size, n_heads, n, _ = m.size()
+        if attention_mask is not None:
+            mask = attention_mask.transpose(0, 1)
+            mask = mask.view(context_sz, batch_size, 1, 1, 1)
+            m = m * mask
+        return m
 
 
 @add_start_docstrings(
@@ -799,8 +849,12 @@ class BermMatrixLayer(nn.Module):
         self.matrix_dim = config.matrix_dim
         self.use_for_context = config.use_for_context
         self.networks_for_heads = config.networks_for_heads
+        self.matrix_encoder_two_layers = config.matrix_encoder_two_layers
 
         self.head_vector_sz = int(self.hidden_size / self.num_matrix_heads)
+        if self.matrix_encoder_two_layers:
+            self.fc1 = nn.Linear(self.hidden_size, self.hidden_size)
+            self.layer_norm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.fc_to_mat = nn.Linear(self.hidden_size, self.num_matrix_heads * self.matrix_dim * self.matrix_dim)
         if self.networks_for_heads == "separate":
             self.v_to_hidden = nn.ModuleList(
@@ -844,6 +898,7 @@ class BermMatrixLayer(nn.Module):
 
         batch_sz, context_sz, *_ = hidden_states.size()
         m_norm, m = self.predict_matrix(hidden_states)
+        m_norm = m_norm.reshape(context_sz, batch_sz * self.num_matrix_heads, self.matrix_dim, self.matrix_dim)
 
         available_vectors = {}
 
@@ -950,10 +1005,15 @@ class BermMatrixLayer(nn.Module):
         batch_sz, context_sz, *_ = hidden_states.size()
 
         # Matrix preparation
-        m = self.fc_to_mat(hidden_states)
+        x = hidden_states
+        if self.matrix_encoder_two_layers:
+            x = self.fc1(x)
+            x = gelu(x)
+            x = self.layer_norm(x)
+        m = self.fc_to_mat(x)
 
+        m = m.view(batch_sz, context_sz, self.num_matrix_heads, self.matrix_dim, self.matrix_dim)
         m = m.transpose(0, 1)  # we will iterate over context axis
-        m = m.reshape(context_sz, batch_sz * self.num_matrix_heads, self.matrix_dim, self.matrix_dim)
 
         if self.matrix_norm_alg is None:
             m_norm = m
@@ -961,10 +1021,13 @@ class BermMatrixLayer(nn.Module):
             m_norm = self.make_orthogonal(
                 m.view(context_sz, batch_sz * self.num_matrix_heads, self.matrix_dim, self.matrix_dim)
             ).view(m.size())
-        elif self.matrix_norm_alg == "2,3":
-            m_norm = m / torch.norm(m.detach(), dim=(2, 3), keepdim=True)
+        elif self.matrix_norm_alg == "-1, -2":
+            m_norm = m / torch.norm(m.detach(), dim=(-1, -2), keepdim=True)
         elif self.matrix_norm_alg == "-1":
             n = torch.norm(m, dim=-1, keepdim=True)
+            m_norm = m / n
+        elif self.matrix_norm_alg == "-2":
+            n = torch.norm(m, dim=-2, keepdim=True)
             m_norm = m / n
         elif self.matrix_norm_alg == "det":
             d = d = m.detach().det()
