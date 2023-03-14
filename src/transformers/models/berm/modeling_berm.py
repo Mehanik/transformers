@@ -332,10 +332,11 @@ class BermForMaskedLM(BermPreTrainedModel):
 
         self.matrix_unitary_loss_type = config.matrix_unitary_loss
         self.matrix_unitary_loss_k = config.matrix_unitary_loss_k
-        self.unitary_target = None
 
         self.berm = BermModel(config, add_pooling_layer=False)
         self.lm_head = BermHead(config)
+
+        self.preheat_counter = config.matrix_norm_preheat_steps
 
         # The LM head weights require special treatment only when they are tied with the word embeddings
         self.update_keys_to_ignore(config, ["lm_head.decoder.weight"])
@@ -446,18 +447,18 @@ class BermForMaskedLM(BermPreTrainedModel):
                             + matrix_unitary_loss_fct(logits2, target)
                         )
                     elif self.matrix_unitary_loss_type == "MSE":
-                        if self.unitary_target is None:
-                            self.unitary_target = [
-                                torch.eye(n, device=self.device) for i in range(context_sz * batch_size * n_heads)
-                            ]
-                            self.unitary_target = torch.stack(self.unitary_target)
+                        unitary_target = [torch.eye(n, device=self.device)] * (context_sz * batch_size * n_heads)
+                        unitary_target = torch.stack(unitary_target)
                         matrix_unitary_loss_fct = torch.nn.MSELoss()
-                        matrix_norm_loss = matrix_norm_loss + matrix_unitary_loss_fct(product, self.unitary_target)
+                        matrix_unitary_loss = matrix_unitary_loss + matrix_unitary_loss_fct(product, unitary_target)
                     else:
                         raise KeyError()
 
             loss_fct = CrossEntropyLoss()
             masked_lm_loss = loss_fct(prediction_scores.view(-1, self.config.vocab_size), labels.view(-1))
+            if self.preheat_counter > 0:
+                self.preheat_counter -= 1
+                masked_lm_loss = 0
 
             loss = (
                 masked_lm_loss
@@ -850,6 +851,8 @@ class BermMatrixLayer(nn.Module):
         self.use_for_context = config.use_for_context
         self.networks_for_heads = config.networks_for_heads
         self.matrix_encoder_two_layers = config.matrix_encoder_two_layers
+        self.norm_vectors = config.norm_vectors
+        self.detach_norm_vectors = config.detach_norm_vectors
 
         self.head_vector_sz = int(self.hidden_size / self.num_matrix_heads)
         if self.matrix_encoder_two_layers:
@@ -1065,6 +1068,12 @@ class BermMatrixLayer(nn.Module):
         order = range(context_sz) if not reverse_direction else reversed(range(context_sz))
         for i in order:
             new_v = torch.bmm(m[i], v)
+            if self.norm_vectors:
+                if self.detach_norm_vectors:
+                    norm = torch.norm(new_v.detach(), dim=-1, keepdim=True)
+                else:
+                    norm = torch.norm(new_v, dim=-1, keepdim=True)
+                new_v = new_v / norm
 
             if attention_mask is not None:
                 history.append(
@@ -1077,7 +1086,7 @@ class BermMatrixLayer(nn.Module):
                 history.append(new_v)
 
             if accumulate:
-                v = new_v
+                v = history[-1]
 
         return history
 

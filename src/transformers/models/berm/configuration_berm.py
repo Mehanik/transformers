@@ -127,6 +127,9 @@ class BermConfig(PretrainedConfig):
         matrix_unitary_loss=None,
         matrix_unitary_loss_k=1.0,
         matrix_encoder_two_layers=False,
+        matrix_norm_preheat_steps=0,
+        norm_vectors=False,
+        detach_norm_vectors=False,
         **kwargs,
     ):
         super().__init__(pad_token_id=pad_token_id, bos_token_id=bos_token_id, eos_token_id=eos_token_id, **kwargs)
@@ -158,3 +161,6 @@ class BermConfig(PretrainedConfig):
         self.matrix_encoder_two_layers = matrix_encoder_two_layers
         self.matrix_unitary_loss = matrix_unitary_loss
         self.matrix_unitary_loss_k = matrix_unitary_loss_k
+        self.matrix_norm_preheat_steps = matrix_norm_preheat_steps
+        self.norm_vectors = norm_vectors
+        self.detach_norm_vectors = detach_norm_vectors
