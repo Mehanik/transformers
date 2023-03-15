@@ -311,6 +311,11 @@ class BermPreTrainedModel(PreTrainedModel):
             ]
 
 
+@dataclass
+class BermMaskedLMOutput(MaskedLMOutput):
+    metrics: Optional[List] = None
+
+
 @add_start_docstrings("""BERM Model with a `language modeling` head on top.""", BERM_START_DOCSTRING)
 class BermForMaskedLM(BermPreTrainedModel):
     _keys_to_ignore_on_save = [r"lm_head.decoder.weight", r"lm_head.decoder.bias"]
@@ -405,6 +410,7 @@ class BermForMaskedLM(BermPreTrainedModel):
         all_matrices = outputs[-1]
 
         loss = None
+        metrics = {}
         if labels is not None:
             matrix_norm_loss = 0
             if self.matrix_norm_loss_type is not None:
@@ -466,14 +472,21 @@ class BermForMaskedLM(BermPreTrainedModel):
                 + matrix_unitary_loss * self.matrix_unitary_loss_k
             )
 
+            metrics = {
+                "masked_lm_loss": masked_lm_loss,
+                "matrix_norm_loss": matrix_norm_loss,
+                "matrix_unitary_loss": matrix_unitary_loss,
+            }
+
         if not return_dict:
             output = (prediction_scores,) + outputs[2:]
             return ((loss,) + output) if loss is not None else output
 
-        return MaskedLMOutput(
+        return BermMaskedLMOutput(
             loss=loss,
             logits=prediction_scores,
             hidden_states=outputs.hidden_states,
+            metrics=metrics
             # attentions=outputs.attentions,
         )
 
@@ -1299,12 +1312,10 @@ class BermEncoder(nn.Module):
             hidden_states = layer_outputs[0]
             if use_cache:
                 raise NotImplemented()
-                next_decoder_cache += (layer_outputs[-1],)
             if output_matrices:
                 all_matrices = all_matrices + (layer_outputs[1],)
                 if self.config.add_cross_attention:
                     raise NotImplementedError()
-                    all_cross_attentions = all_cross_attentions + (layer_outputs[2],)
 
         if output_hidden_states:
             all_hidden_states = all_hidden_states + (hidden_states,)
