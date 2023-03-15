@@ -412,7 +412,7 @@ class BermForMaskedLM(BermPreTrainedModel):
         loss = None
         metrics = {}
         if labels is not None:
-            matrix_norm_loss = 0
+            matrix_norm_loss = 0.0
             if self.matrix_norm_loss_type is not None:
                 norms = []
                 for m in all_matrices:
@@ -430,7 +430,7 @@ class BermForMaskedLM(BermPreTrainedModel):
 
                 matrix_norm_loss = matrix_norm_loss_fct(norms, target)
 
-            matrix_unitary_loss = 0
+            matrix_unitary_loss = 0.0
             if self.matrix_unitary_loss_type is not None:
                 for m in all_matrices:
                     context_sz, batch_size, n_heads, n, _ = m.size()
@@ -866,6 +866,8 @@ class BermMatrixLayer(nn.Module):
         self.matrix_encoder_two_layers = config.matrix_encoder_two_layers
         self.norm_vectors = config.norm_vectors
         self.detach_norm_vectors = config.detach_norm_vectors
+        self.vector_norm_eps = config.vector_norm_eps
+        self.matrix_norm_alg = config.matrix_norm_alg
 
         self.head_vector_sz = int(self.hidden_size / self.num_matrix_heads)
         if self.matrix_encoder_two_layers:
@@ -1038,17 +1040,17 @@ class BermMatrixLayer(nn.Module):
                 m.view(context_sz, batch_sz * self.num_matrix_heads, self.matrix_dim, self.matrix_dim)
             ).view(m.size())
         elif self.matrix_norm_alg == "-1, -2":
-            m_norm = m / torch.norm(m.detach(), dim=(-1, -2), keepdim=True)
+            m_norm = m / (torch.norm(m.detach(), dim=(-1, -2), keepdim=True) + self.matrix_norm_eps)
         elif self.matrix_norm_alg == "-1":
-            n = torch.norm(m, dim=-1, keepdim=True)
+            n = torch.norm(m, dim=-1, keepdim=True) + self.matrix_norm_eps
             m_norm = m / n
         elif self.matrix_norm_alg == "-2":
-            n = torch.norm(m, dim=-2, keepdim=True)
+            n = torch.norm(m, dim=-2, keepdim=True) + self.matrix_norm_eps
             m_norm = m / n
         elif self.matrix_norm_alg == "det":
             d = d = m.detach().det()
             d = d[..., None, None]
-            m_norm = m / d.abs() ** (1 / self.matrix_dim)
+            m_norm = m / (d.abs() ** (1 / self.matrix_dim) + self.matrix_norm_eps)
         else:
             raise KeyError()
 
@@ -1086,7 +1088,7 @@ class BermMatrixLayer(nn.Module):
                     norm = torch.norm(new_v.detach(), dim=-1, keepdim=True)
                 else:
                     norm = torch.norm(new_v, dim=-1, keepdim=True)
-                new_v = new_v / norm
+                new_v = new_v / (norm + self.vector_norm_eps)
 
             if attention_mask is not None:
                 history.append(
