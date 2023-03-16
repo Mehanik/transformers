@@ -850,7 +850,7 @@ class BermEmbeddings(nn.Module):
 
 
 class BermMatrixLayer(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config: BermConfig):
         super().__init__()
         if config.hidden_size % (config.num_matrix_heads) != 0:
             raise ValueError(
@@ -868,12 +868,17 @@ class BermMatrixLayer(nn.Module):
         self.detach_norm_vectors = config.detach_norm_vectors
         self.vector_norm_eps = config.vector_norm_eps
         self.matrix_norm_alg = config.matrix_norm_alg
+        self.matrix_norm_eps = config.matrix_norm_eps
+        self.complex_matrix = config.complex_matrix
+        self.complex_matrix_abs = config.complex_matrix_abs
 
         self.head_vector_sz = int(self.hidden_size / self.num_matrix_heads)
         if self.matrix_encoder_two_layers:
             self.fc1 = nn.Linear(self.hidden_size, self.hidden_size)
             self.layer_norm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.fc_to_mat = nn.Linear(self.hidden_size, self.num_matrix_heads * self.matrix_dim * self.matrix_dim)
+        if self.complex_matrix:
+            self.fc_to_mat_j = nn.Linear(self.hidden_size, self.num_matrix_heads * self.matrix_dim * self.matrix_dim)
         if self.networks_for_heads == "separate":
             self.v_to_hidden = nn.ModuleList(
                 [
@@ -981,6 +986,12 @@ class BermMatrixLayer(nn.Module):
 
         context = [available_vectors[s] for s in self.use_for_context]
         x = torch.concatenate(context, axis=-1)
+        if self.complex_matrix_abs:
+            x = x.abs()
+        else:
+            x = torch.view_as_real(x).view(
+                batch_sz, context_sz, self.num_matrix_heads, self.matrix_dim * len(self.use_for_context) * 2
+            )
         if self.networks_for_heads == "separate":
             x = [dense(x[..., i, :]) for i, dense in enumerate(self.v_to_hidden)]  # apply each nn for its head
             x = torch.concatenate(x, axis=-1)
@@ -1029,6 +1040,9 @@ class BermMatrixLayer(nn.Module):
             x = gelu(x)
             x = self.layer_norm(x)
         m = self.fc_to_mat(x)
+        if self.complex_matrix:
+            m_j = self.fc_to_mat_j(x)
+            m = torch.view_as_complex(torch.stack([m, m_j], dim=-1))
 
         m = m.view(batch_sz, context_sz, self.num_matrix_heads, self.matrix_dim, self.matrix_dim)
         m = m.transpose(0, 1)  # we will iterate over context axis
@@ -1078,6 +1092,8 @@ class BermMatrixLayer(nn.Module):
             )
         else:
             raise KeyError()
+
+        v = v.type(torch.complex64)
 
         history = [v]
         order = range(context_sz) if not reverse_direction else reversed(range(context_sz))

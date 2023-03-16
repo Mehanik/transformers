@@ -132,6 +132,8 @@ class BermConfig(PretrainedConfig):
         detach_norm_vectors=False,
         vector_norm_eps=1e-6,
         matrix_norm_eps=1e-6,
+        complex_matrix=False,
+        complex_matrix_abs=False,
         **kwargs,
     ):
         super().__init__(pad_token_id=pad_token_id, bos_token_id=bos_token_id, eos_token_id=eos_token_id, **kwargs)
@@ -168,3 +170,5 @@ class BermConfig(PretrainedConfig):
         self.detach_norm_vectors = detach_norm_vectors
         self.vector_norm_eps = vector_norm_eps
         self.matrix_norm_eps = matrix_norm_eps
+        self.complex_matrix = complex_matrix
+        self.complex_matrix_abs = complex_matrix_abs
