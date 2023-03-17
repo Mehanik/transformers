@@ -39,7 +39,7 @@ class BergmanConfig(PretrainedConfig):
 
     Args:
         vocab_size (`int`, *optional*, defaults to 30522):
-            Vocabulary size of the RoBERTa model. Defines the number of different tokens that can be represented by the
+            Vocabulary size of the Bergman model. Defines the number of different tokens that can be represented by the
             `inputs_ids` passed when calling [`BergmanModel`] or [`TFBergmanModel`].
         hidden_size (`int`, *optional*, defaults to 768):
             Dimensionality of the encoder layers and the pooler layer.
@@ -84,7 +84,7 @@ class BergmanConfig(PretrainedConfig):
     ```python
     >>> from transformers import BergmanConfig, BergmanModel
 
-    >>> # Initializing a RoBERTa configuration
+    >>> # Initializing a Bergman configuration
     >>> configuration = BergmanConfig()
 
     >>> # Initializing a model (with random weights) from the configuration
