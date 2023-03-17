@@ -14,7 +14,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""PyTorch BERM model."""
+"""PyTorch BERGMAN model."""
 from dataclasses import dataclass
 import math
 from typing import List, Optional, Tuple, Union
@@ -47,15 +47,15 @@ from ...utils import (
     logging,
     replace_return_docstrings,
 )
-from .configuration_berm import BermConfig
+from .configuration_bergman import BergmanConfig
 
 
 logger = logging.get_logger(__name__)
 
-_CHECKPOINT_FOR_DOC = "berm-base"
-_CONFIG_FOR_DOC = "BermConfig"
+_CHECKPOINT_FOR_DOC = "bergman-base"
+_CONFIG_FOR_DOC = "BergmanConfig"
 
-BERM_INPUTS_DOCSTRING = r"""
+BERGMAN_INPUTS_DOCSTRING = r"""
     Args:
         input_ids (`torch.LongTensor` of shape `({0})`):
             Indices of input sequence tokens in the vocabulary.
@@ -105,7 +105,7 @@ BERM_INPUTS_DOCSTRING = r"""
             Whether or not to return a [`~utils.ModelOutput`] instead of a plain tuple.
 """
 
-BERM_START_DOCSTRING = r"""
+BERGMAN_START_DOCSTRING = r"""
 
     This model inherits from [`PreTrainedModel`]. Check the superclass documentation for the generic methods the
     library implements for all its model (such as downloading or saving, resizing the input embeddings, pruning heads
@@ -116,12 +116,12 @@ BERM_START_DOCSTRING = r"""
     and behavior.
 
     Parameters:
-        config ([`BermConfig`]): Model configuration class with all the parameters of the
+        config ([`BergmanConfig`]): Model configuration class with all the parameters of the
             model. Initializing with a config file does not load the weights associated with the model, only the
             configuration. Check out the [`~PreTrainedModel.from_pretrained`] method to load the model weights.
 """
 
-BERM_INPUTS_DOCSTRING = r"""
+BERGMAN_INPUTS_DOCSTRING = r"""
     Args:
         input_ids (`torch.LongTensor` of shape `({0})`):
             Indices of input sequence tokens in the vocabulary.
@@ -173,7 +173,7 @@ BERM_INPUTS_DOCSTRING = r"""
 
 
 @dataclass
-class BermOutputWithPast(ModelOutput):
+class BergmanOutputWithPast(ModelOutput):
     """
     Base class for model's outputs that may also contain a internal vector (to speed up sequential decoding).
 
@@ -219,7 +219,7 @@ class BermOutputWithPast(ModelOutput):
 
 
 @dataclass
-class BermOutputWithPooling(ModelOutput):
+class BergmanOutputWithPooling(ModelOutput):
     """
     Base class for model's outputs that also contains a pooling of the last hidden states.
 
@@ -267,14 +267,14 @@ class BermOutputWithPooling(ModelOutput):
     # cross_attentions: Optional[Tuple[torch.FloatTensor]] = None
 
 
-class BermPreTrainedModel(PreTrainedModel):
+class BergmanPreTrainedModel(PreTrainedModel):
     """
     An abstract class to handle weights initialization and a simple interface for downloading and loading pretrained
     models.
     """
 
-    config_class = BermConfig
-    base_model_prefix = "berm"  # TODO
+    config_class = BergmanConfig
+    base_model_prefix = "bergman"  # TODO
     supports_gradient_checkpointing = True
     _no_split_modules = []
 
@@ -296,7 +296,7 @@ class BermPreTrainedModel(PreTrainedModel):
             module.weight.data.fill_(1.0)
 
     def _set_gradient_checkpointing(self, module, value=False):
-        if isinstance(module, BermEncoder):
+        if isinstance(module, BergmanEncoder):
             module.gradient_checkpointing = value
 
     def update_keys_to_ignore(self, config, del_keys_to_ignore):
@@ -310,12 +310,12 @@ class BermPreTrainedModel(PreTrainedModel):
 
 
 @dataclass
-class BermMaskedLMOutput(MaskedLMOutput):
+class BergmanMaskedLMOutput(MaskedLMOutput):
     metrics: Optional[List] = None
 
 
-@add_start_docstrings("""BERM Model with a `language modeling` head on top.""", BERM_START_DOCSTRING)
-class BermForMaskedLM(BermPreTrainedModel):
+@add_start_docstrings("""BERGMAN Model with a `language modeling` head on top.""", BERGMAN_START_DOCSTRING)
+class BergmanForMaskedLM(BergmanPreTrainedModel):
     _keys_to_ignore_on_save = [r"lm_head.decoder.weight", r"lm_head.decoder.bias"]
     _keys_to_ignore_on_load_missing = [r"position_ids", r"lm_head.decoder.weight", r"lm_head.decoder.bias"]
     _keys_to_ignore_on_load_unexpected = [r"pooler"]
@@ -325,7 +325,7 @@ class BermForMaskedLM(BermPreTrainedModel):
 
         if config.is_decoder:
             logger.warning(
-                "If you want to use `BermForMaskedLM` make sure `config.is_decoder=False` for "
+                "If you want to use `BergmanForMaskedLM` make sure `config.is_decoder=False` for "
                 "bi-directional self-attention."
             )
 
@@ -336,8 +336,8 @@ class BermForMaskedLM(BermPreTrainedModel):
         self.matrix_unitary_loss_type = config.matrix_unitary_loss
         self.matrix_unitary_loss_k = config.matrix_unitary_loss_k
 
-        self.berm = BermModel(config, add_pooling_layer=False)
-        self.lm_head = BermHead(config)
+        self.bergman = BergmanModel(config, add_pooling_layer=False)
+        self.lm_head = BergmanHead(config)
 
         self.preheat_counter = config.matrix_norm_preheat_steps
 
@@ -353,7 +353,7 @@ class BermForMaskedLM(BermPreTrainedModel):
     def set_output_embeddings(self, new_embeddings):
         self.lm_head.decoder = new_embeddings
 
-    @add_start_docstrings_to_model_forward(BERM_INPUTS_DOCSTRING.format("batch_size, sequence_length"))
+    @add_start_docstrings_to_model_forward(BERGMAN_INPUTS_DOCSTRING.format("batch_size, sequence_length"))
     @add_code_sample_docstrings(
         checkpoint=_CHECKPOINT_FOR_DOC,
         output_type=MaskedLMOutput,
@@ -387,7 +387,7 @@ class BermForMaskedLM(BermPreTrainedModel):
         """
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
-        outputs = self.berm(
+        outputs = self.bergman(
             input_ids,
             attention_mask=attention_mask,
             token_type_ids=token_type_ids,
@@ -480,7 +480,7 @@ class BermForMaskedLM(BermPreTrainedModel):
             output = (prediction_scores,) + outputs[2:]
             return ((loss,) + output) if loss is not None else output
 
-        return BermMaskedLMOutput(
+        return BergmanMaskedLMOutput(
             loss=loss,
             logits=prediction_scores,
             hidden_states=outputs.hidden_states,
@@ -498,10 +498,10 @@ class BermForMaskedLM(BermPreTrainedModel):
 
 
 @add_start_docstrings(
-    "The bare BERM Model transformer outputting raw hidden-states without any specific head on top.",
-    BERM_START_DOCSTRING,
+    "The bare BERGMAN Model transformer outputting raw hidden-states without any specific head on top.",
+    BERGMAN_START_DOCSTRING,
 )
-class BermModel(BermPreTrainedModel):
+class BergmanModel(BergmanPreTrainedModel):
     """
 
     The model can behave as an encoder (with only self-attention) as well as a decoder, in which case a layer of
@@ -519,15 +519,15 @@ class BermModel(BermPreTrainedModel):
 
     _keys_to_ignore_on_load_missing = [r"position_ids"]
 
-    # Copied from transformers.models.bert.modeling_bert.BertModel.__init__ with Bert->Berm
+    # Copied from transformers.models.bert.modeling_bert.BertModel.__init__ with Bert->Bergman
     def __init__(self, config, add_pooling_layer=True):
         super().__init__(config)
         self.config = config
 
-        self.embeddings = BermEmbeddings(config)
-        self.encoder = BermEncoder(config)
+        self.embeddings = BergmanEmbeddings(config)
+        self.encoder = BergmanEncoder(config)
 
-        self.pooler = BermPooler(config) if add_pooling_layer else None
+        self.pooler = BergmanPooler(config) if add_pooling_layer else None
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -546,10 +546,10 @@ class BermModel(BermPreTrainedModel):
         for layer, heads in heads_to_prune.items():
             self.encoder.layer[layer].attention.prune_heads(heads)
 
-    @add_start_docstrings_to_model_forward(BERM_INPUTS_DOCSTRING.format("batch_size, sequence_length"))
+    @add_start_docstrings_to_model_forward(BERGMAN_INPUTS_DOCSTRING.format("batch_size, sequence_length"))
     @add_code_sample_docstrings(
         checkpoint=_CHECKPOINT_FOR_DOC,
-        output_type=BermOutputWithPast,
+        output_type=BergmanOutputWithPast,
         config_class=_CONFIG_FOR_DOC,
     )
     # Copied from transformers.models.bert.modeling_bert.BertModel.forward
@@ -568,7 +568,7 @@ class BermModel(BermPreTrainedModel):
         output_matrices: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
-    ) -> Union[Tuple[torch.Tensor], BermOutputWithPooling]:
+    ) -> Union[Tuple[torch.Tensor], BergmanOutputWithPooling]:
         r"""
         encoder_hidden_states  (`torch.FloatTensor` of shape `(batch_size, sequence_length, hidden_size)`, *optional*):
             Sequence of hidden-states at the output of the last layer of the encoder. Used in the cross-attention if
@@ -673,7 +673,7 @@ class BermModel(BermPreTrainedModel):
         if not return_dict:
             return (sequence_output, pooled_output) + encoder_outputs[1:]
 
-        return BermOutputWithPooling(
+        return BergmanOutputWithPooling(
             last_hidden_state=sequence_output,
             pooler_output=pooled_output,
             past_vectors=encoder_outputs.past_vectors,
@@ -728,8 +728,8 @@ class BermModel(BermPreTrainedModel):
         return extended_attention_mask
 
 
-class BermHead(nn.Module):
-    """BERM Head for masked language modeling."""
+class BergmanHead(nn.Module):
+    """BERGMAN Head for masked language modeling."""
 
     def __init__(self, config):
         super().__init__()
@@ -759,7 +759,7 @@ class BermHead(nn.Module):
             self.bias = self.decoder.bias
 
 
-class BermEmbeddings(nn.Module):
+class BergmanEmbeddings(nn.Module):
     """
     Same as BertEmbeddings with a tiny tweak for positional embeddings indexing.
     TODO: no positional embeddings
@@ -847,8 +847,8 @@ class BermEmbeddings(nn.Module):
         return position_ids.unsqueeze(0).expand(input_shape)
 
 
-class BermMatrixLayer(nn.Module):
-    def __init__(self, config: BermConfig):
+class BergmanMatrixLayer(nn.Module):
+    def __init__(self, config: BergmanConfig):
         super().__init__()
         if config.hidden_size % (config.num_matrix_heads) != 0:
             raise ValueError(
@@ -1128,7 +1128,7 @@ class BermMatrixLayer(nn.Module):
         return history
 
 
-class BermMatrixOutput(nn.Module):
+class BergmanMatrixOutput(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.dense = nn.Linear(config.hidden_size, config.hidden_size)
@@ -1143,7 +1143,7 @@ class BermMatrixOutput(nn.Module):
 
 
 # Copied from transformers.models.bert.modeling_bert.BertIntermediate
-class BermIntermediate(nn.Module):
+class BergmanIntermediate(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.dense = nn.Linear(config.hidden_size, config.intermediate_size)
@@ -1159,7 +1159,7 @@ class BermIntermediate(nn.Module):
 
 
 # Copied from transformers.models.bert.modeling_bert.BertOutput
-class BermOutput(nn.Module):
+class BergmanOutput(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.dense = nn.Linear(config.intermediate_size, config.hidden_size)
@@ -1173,11 +1173,11 @@ class BermOutput(nn.Module):
         return hidden_states
 
 
-class BermMatrixBlock(nn.Module):
+class BergmanMatrixBlock(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.mm = BermMatrixLayer(config)
-        self.output = BermMatrixOutput(config)
+        self.mm = BergmanMatrixLayer(config)
+        self.output = BergmanMatrixOutput(config)
         self.pruned_heads = set()
 
     def forward(
@@ -1204,19 +1204,19 @@ class BermMatrixBlock(nn.Module):
         return outputs
 
 
-class BermLayer(nn.Module):
+class BergmanLayer(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.chunk_size_feed_forward = config.chunk_size_feed_forward
-        self.matrix_blk = BermMatrixBlock(config)
+        self.matrix_blk = BergmanMatrixBlock(config)
         self.seq_len_dim = 1
         self.is_decoder = config.is_decoder
         self.add_cross_attention = config.add_cross_attention
 
         assert not self.add_cross_attention, "Not implemented"
 
-        self.intermediate = BermIntermediate(config)
-        self.output = BermOutput(config)
+        self.intermediate = BergmanIntermediate(config)
+        self.output = BergmanOutput(config)
 
     def forward(
         self,
@@ -1263,11 +1263,11 @@ class BermLayer(nn.Module):
         return layer_output
 
 
-class BermEncoder(nn.Module):
+class BergmanEncoder(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.config = config
-        self.layer = nn.ModuleList([BermLayer(config) for _ in range(config.num_hidden_layers)])
+        self.layer = nn.ModuleList([BergmanLayer(config) for _ in range(config.num_hidden_layers)])
         self.gradient_checkpointing = False
 
     def forward(
@@ -1282,7 +1282,7 @@ class BermEncoder(nn.Module):
         output_matrices: Optional[bool] = False,
         output_hidden_states: Optional[bool] = False,
         return_dict: Optional[bool] = True,
-    ) -> Union[Tuple[torch.Tensor], BermOutputWithPast]:
+    ) -> Union[Tuple[torch.Tensor], BergmanOutputWithPast]:
         all_hidden_states = () if output_hidden_states else None
         all_matrices = () if output_matrices else None
         # all_cross_attentions = () if output_matrices and self.config.add_cross_attention else None
@@ -1350,7 +1350,7 @@ class BermEncoder(nn.Module):
                 ]
                 if v is not None
             )
-        return BermOutputWithPast(
+        return BergmanOutputWithPast(
             last_hidden_state=hidden_states,
             past_vectors=next_decoder_cache,
             hidden_states=all_hidden_states,
@@ -1360,7 +1360,7 @@ class BermEncoder(nn.Module):
 
 
 # Copied from transformers.models.bert.modeling_bert.BertPooler
-class BermPooler(nn.Module):
+class BergmanPooler(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.dense = nn.Linear(config.hidden_size, config.hidden_size)

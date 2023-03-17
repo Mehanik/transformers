@@ -14,7 +14,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" BERM configuration"""
+""" BERGMAN configuration"""
 from collections import OrderedDict
 from typing import Mapping
 
@@ -25,13 +25,13 @@ from ...utils import logging
 
 logger = logging.get_logger(__name__)
 
-BERM_PRETRAINED_CONFIG_ARCHIVE_MAP = {}
+BERGMAN_PRETRAINED_CONFIG_ARCHIVE_MAP = {}
 
 
-class BermConfig(PretrainedConfig):
+class BergmanConfig(PretrainedConfig):
     r"""
-    This is the configuration class to store the configuration of a [`BermModel`] or a [`TFBermModel`]. It is
-    used to instantiate a BERM model according to the specified arguments, defining the model architecture.
+    This is the configuration class to store the configuration of a [`BergmanModel`] or a [`TFBergmanModel`]. It is
+    used to instantiate a BERGMAN model according to the specified arguments, defining the model architecture.
 
     Configuration objects inherit from [`PretrainedConfig`] and can be used to control the model outputs. Read the
     documentation from [`PretrainedConfig`] for more information.
@@ -40,7 +40,7 @@ class BermConfig(PretrainedConfig):
     Args:
         vocab_size (`int`, *optional*, defaults to 30522):
             Vocabulary size of the RoBERTa model. Defines the number of different tokens that can be represented by the
-            `inputs_ids` passed when calling [`BermModel`] or [`TFBermModel`].
+            `inputs_ids` passed when calling [`BergmanModel`] or [`TFBergmanModel`].
         hidden_size (`int`, *optional*, defaults to 768):
             Dimensionality of the encoder layers and the pooler layer.
         num_hidden_layers (`int`, *optional*, defaults to 12):
@@ -60,7 +60,7 @@ class BermConfig(PretrainedConfig):
             The maximum sequence length that this model might ever be used with. Typically set this to something large
             just in case (e.g., 512 or 1024 or 2048).
         type_vocab_size (`int`, *optional*, defaults to 2):
-            The vocabulary size of the `token_type_ids` passed when calling [`BermModel`] or [`TFBermModel`].
+            The vocabulary size of the `token_type_ids` passed when calling [`BergmanModel`] or [`TFBergmanModel`].
         initializer_range (`float`, *optional*, defaults to 0.02):
             The standard deviation of the truncated_normal_initializer for initializing all weight matrices.
         layer_norm_eps (`float`, *optional*, defaults to 1e-12):
@@ -82,18 +82,18 @@ class BermConfig(PretrainedConfig):
     Examples:
 
     ```python
-    >>> from transformers import BermConfig, BermModel
+    >>> from transformers import BergmanConfig, BergmanModel
 
     >>> # Initializing a RoBERTa configuration
-    >>> configuration = BermConfig()
+    >>> configuration = BergmanConfig()
 
     >>> # Initializing a model (with random weights) from the configuration
-    >>> model = BermModel(configuration)
+    >>> model = BergmanModel(configuration)
 
     >>> # Accessing the model configuration
     >>> configuration = model.config
     ```"""
-    model_type = "berm"
+    model_type = "bergman"
 
     def __init__(
         self,

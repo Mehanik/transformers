@@ -29,8 +29,8 @@ from ...utils import (
 
 
 _import_structure = {
-    "configuration_berm": ["BERM_PRETRAINED_CONFIG_ARCHIVE_MAP", "BermConfig", "BermOnnxConfig"],
-    "tokenization_berm": ["BermTokenizer"],
+    "configuration_bergman": ["BERGMAN_PRETRAINED_CONFIG_ARCHIVE_MAP", "BergmanConfig", "BergmanOnnxConfig"],
+    "tokenization_bergman": ["BergmanTokenizer"],
 }
 
 try:
@@ -39,7 +39,7 @@ try:
 except OptionalDependencyNotAvailable:
     pass
 else:
-    _import_structure["tokenization_berm_fast"] = ["BermTokenizerFast"]
+    _import_structure["tokenization_bergman_fast"] = ["BergmanTokenizerFast"]
 
 try:
     if not is_torch_available():
@@ -47,16 +47,16 @@ try:
 except OptionalDependencyNotAvailable:
     pass
 else:
-    _import_structure["modeling_berm"] = [
-        "BERM_PRETRAINED_MODEL_ARCHIVE_LIST",
-        "BermForCausalLM",
-        "BermForMaskedLM",
-        "BermForMultipleChoice",
-        "BermForQuestionAnswering",
-        "BermForSequenceClassification",
-        "BermForTokenClassification",
-        "BermModel",
-        "BermPreTrainedModel",
+    _import_structure["modeling_bergman"] = [
+        "BERGMAN_PRETRAINED_MODEL_ARCHIVE_LIST",
+        "BergmanForCausalLM",
+        "BergmanForMaskedLM",
+        "BergmanForMultipleChoice",
+        "BergmanForQuestionAnswering",
+        "BergmanForSequenceClassification",
+        "BergmanForTokenClassification",
+        "BergmanModel",
+        "BergmanPreTrainedModel",
     ]
 
 try:
@@ -65,17 +65,17 @@ try:
 except OptionalDependencyNotAvailable:
     pass
 else:
-    _import_structure["modeling_tf_berm"] = [
-        "TF_BERM_PRETRAINED_MODEL_ARCHIVE_LIST",
-        "TFBermForCausalLM",
-        "TFBermForMaskedLM",
-        "TFBermForMultipleChoice",
-        "TFBermForQuestionAnswering",
-        "TFBermForSequenceClassification",
-        "TFBermForTokenClassification",
-        "TFBermMainLayer",
-        "TFBermModel",
-        "TFBermPreTrainedModel",
+    _import_structure["modeling_tf_bergman"] = [
+        "TF_BERGMAN_PRETRAINED_MODEL_ARCHIVE_LIST",
+        "TFBergmanForCausalLM",
+        "TFBergmanForMaskedLM",
+        "TFBergmanForMultipleChoice",
+        "TFBergmanForQuestionAnswering",
+        "TFBergmanForSequenceClassification",
+        "TFBergmanForTokenClassification",
+        "TFBergmanMainLayer",
+        "TFBergmanModel",
+        "TFBergmanPreTrainedModel",
     ]
 
 try:
@@ -84,21 +84,21 @@ try:
 except OptionalDependencyNotAvailable:
     pass
 else:
-    _import_structure["modeling_flax_berm"] = [
-        "FlaxBermForCausalLM",
-        "FlaxBermForMaskedLM",
-        "FlaxBermForMultipleChoice",
-        "FlaxBermForQuestionAnswering",
-        "FlaxBermForSequenceClassification",
-        "FlaxBermForTokenClassification",
-        "FlaxBermModel",
-        "FlaxBermPreTrainedModel",
+    _import_structure["modeling_flax_bergman"] = [
+        "FlaxBergmanForCausalLM",
+        "FlaxBergmanForMaskedLM",
+        "FlaxBergmanForMultipleChoice",
+        "FlaxBergmanForQuestionAnswering",
+        "FlaxBergmanForSequenceClassification",
+        "FlaxBergmanForTokenClassification",
+        "FlaxBergmanModel",
+        "FlaxBergmanPreTrainedModel",
     ]
 
 
 if TYPE_CHECKING:
-    from .configuration_berm import BERM_PRETRAINED_CONFIG_ARCHIVE_MAP, BermConfig, BermOnnxConfig
-    from .tokenization_berm import BermTokenizer
+    from .configuration_bergman import BERGMAN_PRETRAINED_CONFIG_ARCHIVE_MAP, BergmanConfig, BergmanOnnxConfig
+    from .tokenization_bergman import BergmanTokenizer
 
     try:
         if not is_tokenizers_available():
@@ -106,7 +106,7 @@ if TYPE_CHECKING:
     except OptionalDependencyNotAvailable:
         pass
     else:
-        from .tokenization_berm_fast import BermTokenizerFast
+        from .tokenization_bergman_fast import BergmanTokenizerFast
 
     try:
         if not is_torch_available():
@@ -114,16 +114,16 @@ if TYPE_CHECKING:
     except OptionalDependencyNotAvailable:
         pass
     else:
-        from .modeling_berm import (
-            BERM_PRETRAINED_MODEL_ARCHIVE_LIST,
-            BermForCausalLM,
-            BermForMaskedLM,
-            BermForMultipleChoice,
-            BermForQuestionAnswering,
-            BermForSequenceClassification,
-            BermForTokenClassification,
-            BermModel,
-            BermPreTrainedModel,
+        from .modeling_bergman import (
+            BERGMAN_PRETRAINED_MODEL_ARCHIVE_LIST,
+            BergmanForCausalLM,
+            BergmanForMaskedLM,
+            BergmanForMultipleChoice,
+            BergmanForQuestionAnswering,
+            BergmanForSequenceClassification,
+            BergmanForTokenClassification,
+            BergmanModel,
+            BergmanPreTrainedModel,
         )
 
 else:
