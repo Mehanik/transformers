@@ -15,6 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """PyTorch BERM model."""
+from dataclasses import dataclass
 import math
 from typing import List, Optional, Tuple, Union
 
@@ -24,13 +25,10 @@ from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 import torch.utils.checkpoint
 
 from ...activations import ACT2FN, gelu
-from dataclasses import dataclass
 from ...modeling_outputs import (
-    # BaseModelOutputWithPastAndCrossAttentions,
-    # BaseModelOutputWithPoolingAndCrossAttentions,
-    ModelOutput,
     CausalLMOutputWithCrossAttentions,
     MaskedLMOutput,
+    ModelOutput,
     MultipleChoiceModelOutput,
     QuestionAnsweringModelOutput,
     SequenceClassifierOutput,
@@ -1049,22 +1047,24 @@ class BermMatrixLayer(nn.Module):
 
         if self.matrix_norm_alg is None:
             m_norm = m
-        elif self.matrix_norm_alg == "ortho":
-            m_norm = self.make_orthogonal(
-                m.view(context_sz, batch_sz * self.num_matrix_heads, self.matrix_dim, self.matrix_dim)
-            ).view(m.size())
-        elif self.matrix_norm_alg == "-1, -2":
-            m_norm = m / (torch.norm(m.detach(), dim=(-1, -2), keepdim=True) + self.matrix_norm_eps)
-        elif self.matrix_norm_alg == "-1":
-            n = torch.norm(m, dim=-1, keepdim=True) + self.matrix_norm_eps
+        elif isinstance(self.matrix_norm_alg, int):
+            n = torch.norm(m, dim=self.matrix_norm_alg, keepdim=True) + self.matrix_norm_eps
             m_norm = m / n
-        elif self.matrix_norm_alg == "-2":
-            n = torch.norm(m, dim=-2, keepdim=True) + self.matrix_norm_eps
-            m_norm = m / n
+        elif isinstance(self.matrix_norm_alg, list) or isinstance(self.matrix_norm_alg, tuple):
+            assert len(self.matrix_norm_alg) == 2  # This section is for Frobenius Norm
+            m_norm = (
+                m
+                / (torch.norm(m, dim=self.matrix_norm_alg, keepdim=True) + self.matrix_norm_eps)
+                * math.sqrt(self.matrix_dim)
+            )
         elif self.matrix_norm_alg == "det":
             d = d = m.detach().det()
             d = d[..., None, None]
             m_norm = m / (d.abs() ** (1 / self.matrix_dim) + self.matrix_norm_eps)
+        elif self.matrix_norm_alg == "ortho":
+            m_norm = self.make_orthogonal(
+                m.view(context_sz, batch_sz * self.num_matrix_heads, self.matrix_dim, self.matrix_dim)
+            ).view(m.size())
         else:
             raise KeyError()
 
